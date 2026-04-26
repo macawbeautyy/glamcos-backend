@@ -1,0 +1,99 @@
+################################################################################
+#  GLAMCOS PLATFORM — Render Deployment Configuration
+#  Docs: https://render.com/docs/render-yaml-spec
+################################################################################
+
+services:
+  - type: web
+    name: glamcos-backend
+    runtime: node
+    region: singapore          # closest to India; change to: ohio / oregon / frankfurt
+    plan: free                 # upgrade to starter ($7/mo) for always-on
+
+    # Build & start
+    rootDir: .                 # render.yaml lives in the backend folder; repo root = backend
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+
+    # Health check — Render uses this to confirm the service is up
+    healthCheckPath: /api/v1/health
+
+    # Auto-deploy on every push to main branch
+    autoDeploy: true
+
+    # ── Environment Variables ────────────────────────────────────────────────
+    # Set SECRET values via the Render Dashboard → Environment tab.
+    # Non-secret defaults are listed here for convenience.
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: API_VERSION
+        value: v1
+
+      - key: PORT
+        value: 10000             # Render always injects PORT; this is the default
+
+      # MongoDB — paste your Atlas connection string in the Dashboard
+      - key: MONGO_URI
+        sync: false              # mark as secret; set via Dashboard
+
+      # JWT — generate strong random strings for production
+      - key: JWT_SECRET
+        sync: false
+
+      - key: JWT_EXPIRE
+        value: 30d
+
+      - key: JWT_COOKIE_EXPIRE
+        value: "30"
+
+      - key: JWT_REFRESH_SECRET
+        sync: false
+
+      - key: JWT_REFRESH_EXPIRE
+        value: 90d
+
+      # CORS — update these once your frontend apps are deployed
+      - key: CORS_ORIGIN_USER_APP
+        value: https://your-user-app.onrender.com
+
+      - key: CORS_ORIGIN_PROVIDER_APP
+        value: https://your-provider-app.onrender.com
+
+      - key: CORS_ORIGIN_MARKETPLACE_APP
+        value: https://your-marketplace-app.onrender.com
+
+      - key: CORS_ORIGIN_ADMIN_PANEL
+        value: https://your-admin-panel.onrender.com
+
+      # Rate limiting
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+
+      - key: RATE_LIMIT_MAX
+        value: "100"
+
+      # File upload
+      - key: MAX_FILE_UPLOAD
+        value: "5000000"
+
+      - key: FILE_UPLOAD_PATH
+        value: ./public/uploads
+
+      # Logging
+      - key: LOG_LEVEL
+        value: info
+
+      - key: LOG_FILE
+        value: logs/app.log
+
+      # Firebase (optional — leave blank if not using push notifications)
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
