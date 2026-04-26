@@ -5,6 +5,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const { sanitizeUser } = require('../utils/helpers');
 const config = require('../config/env');
 
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * @desc    Register a new user
  * @route   POST /api/v1/auth/register
@@ -248,7 +250,8 @@ const getAllUsers = asyncHandler(async (req, res) => {
   if (status && status !== 'all') filter.status = status;
 
   if (search) {
-    const regex = new RegExp(search, 'i');
+    const safeSearch = escapeRegex(String(search)).slice(0, 64);
+    const regex = new RegExp(safeSearch, 'i');
     filter.$or  = [
       { firstName: regex },
       { lastName:  regex },
