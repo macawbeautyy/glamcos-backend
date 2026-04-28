@@ -5,6 +5,11 @@ const ApplicationSchema = new mongoose.Schema({
   applicant: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   coverLetter: { type: String, default: '' },
   resumeUrl:   { type: String, default: '' },
+  // Extra fields sent from the apply modal (name, phone, email, experience)
+  applicantName:  { type: String, default: '' },
+  applicantPhone: { type: String, default: '' },
+  applicantEmail: { type: String, default: '' },
+  experience:     { type: String, default: '' },
   status: {
     type: String,
     enum: ['applied', 'shortlisted', 'rejected', 'hired'],

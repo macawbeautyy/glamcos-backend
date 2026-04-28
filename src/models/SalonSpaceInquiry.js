@@ -10,6 +10,7 @@ const salonSpaceInquirySchema = new mongoose.Schema({
   message: { type: String, trim: true, default: '' },
   status:  { type: String, enum: ['new', 'contacted', 'closed'], default: 'new' },
   adminNote: { type: String, default: '' },
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: true });
 
 module.exports = mongoose.model('SalonSpaceInquiry', salonSpaceInquirySchema);

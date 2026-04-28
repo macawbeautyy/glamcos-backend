@@ -228,9 +228,13 @@ const applyForJob = asyncHandler(async (req, res) => {
   if (already) throw ApiError.badRequest('You have already applied for this job');
 
   job.applications.push({
-    applicant:   userId,
-    coverLetter: req.body.coverLetter || req.body.coverNote || '',
-    resumeUrl:   req.body.resumeUrl   || '',
+    applicant:      userId,
+    coverLetter:    req.body.coverLetter    || req.body.coverNote    || '',
+    resumeUrl:      req.body.resumeUrl      || '',
+    applicantName:  req.body.applicantName  || '',
+    applicantPhone: req.body.applicantPhone || '',
+    applicantEmail: req.body.applicantEmail || '',
+    experience:     req.body.experience     || '',
   });
   job.applicationCount = job.applications.length;
   await job.save();

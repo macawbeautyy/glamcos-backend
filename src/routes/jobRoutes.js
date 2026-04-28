@@ -16,24 +16,28 @@ const {
   updateApplicationStatus,
 } = require('../controllers/jobController');
 
+// ── IMPORTANT: Specific static routes must come BEFORE /:id wildcard routes ──
+
 // ── Public routes ─────────────────────────────────────────────────────────────
-router.get('/',     getJobs);
-router.get('/:id',  getJobById);
+router.get('/', getJobs);
 
-// ── Authenticated seeker routes ───────────────────────────────────────────────
-router.post('/:id/apply',           protect, applyForJob);
-router.get('/applications/my',       protect, getMyApplications);
+// ── Admin routes (before /:id to avoid conflicts) ─────────────────────────────
+router.get('/admin/applications', protect, authorize('admin'), getAllApplications);
 
-// ── Authenticated employer routes ─────────────────────────────────────────────
-router.post('/',                         protect, postJob);
-router.get('/my/listings',               protect, getMyListings);
-router.patch('/:id',                     protect, updateJob);
-router.delete('/:id',                    protect, deleteJob);
-router.post('/:id/boost',                protect, boostJob);
-router.get('/:id/applications',          protect, getJobApplications);
+// ── Seeker routes ─────────────────────────────────────────────────────────────
+router.get('/applications/my', protect, getMyApplications);
+
+// ── Employer static routes ────────────────────────────────────────────────────
+router.post('/', protect, postJob);
+router.get('/my/listings', protect, getMyListings);
 router.patch('/applications/:applicationId/status', protect, updateApplicationStatus);
 
-// ── Admin routes ──────────────────────────────────────────────────────────────
-router.get('/admin/applications', protect, authorize('admin'), getAllApplications);
+// ── Dynamic /:id routes (must be AFTER all static routes) ─────────────────────
+router.get('/:id', getJobById);
+router.post('/:id/apply', protect, applyForJob);
+router.patch('/:id', protect, updateJob);
+router.delete('/:id', protect, deleteJob);
+router.post('/:id/boost', protect, boostJob);
+router.get('/:id/applications', protect, getJobApplications);
 
 module.exports = router;
