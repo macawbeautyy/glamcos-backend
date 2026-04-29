@@ -1,5 +1,6 @@
 const express = require('express');
 const router  = express.Router();
+const aiRoutes = require('./aiRoutes');
 
 router.use('/auth',       require('./authRoutes'));
 router.use('/categories', require('./categoryRoutes'));
@@ -24,6 +25,7 @@ router.use('/orders',       require('./orderRoutes'));
 router.use('/payments',     require('./paymentRoutes'));
 router.use('/reviews',      require('./reviewRoutes'));
 router.use('/sellers',      require('./sellerRoutes'));
+router.use('/ai', aiRoutes);
 
 // ── Phase 5: Franchise & Salon Spaces ────────────────────────────────────────
 router.use('/franchise',    require('./franchiseRoutes'));
