@@ -36,7 +36,7 @@ const { errorHandler, notFoundHandler } = require('./src/middleware/errorHandler
 //  Initialize Express App
 // =====================================================
 const app = express();
-
+app.set('trust proxy', 1);
 // =====================================================
 //  Security Middleware
 // =====================================================
