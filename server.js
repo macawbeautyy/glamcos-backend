@@ -156,12 +156,10 @@ app.use(errorHandler);
 // =====================================================
 const startServer = async () => {
   try {
-    // Connect to MongoDB
-    await connectDB();
-
     const PORT = config.port;
 
-    const server = app.listen(PORT, () => {
+    // Listen first so Render detects the port
+    const server = app.listen(PORT, '0.0.0.0', () => {
       logger.info('='.repeat(55));
       logger.info(`  SERVIFY PLATFORM API SERVER`);
       logger.info(`  Environment : ${config.env}`);
@@ -170,6 +168,11 @@ const startServer = async () => {
       logger.info(`  Health      : http://localhost:${PORT}/api/${config.apiVersion}/health`);
       logger.info('='.repeat(55));
     });
+
+    // Then connect to MongoDB
+    await connectDB();
+
+    // ... rest of your error handlers
 
     // Handle unhandled promise rejections
     process.on('unhandledRejection', (err) => {
