@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { firebaseLogin } = require('../controllers/authController');
 
 const {
   register,
@@ -47,6 +48,7 @@ router.post('/login',          authLimiter, loginValidation,    login);
 router.post('/refresh-token',  authLimiter, refreshToken);
 router.post('/forgot-password',authLimiter, forgotPassword);
 router.post('/reset-password', authLimiter, resetPassword);
+router.post('/firebase',       authLimiter, firebaseLogin);
 
 // ── Protected Routes ──────────────────────────────────────────────────────────
 router.get('/me',              protect, getMe);

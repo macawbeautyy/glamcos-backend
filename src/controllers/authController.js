@@ -81,6 +81,84 @@ const login = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @desc    Firebase Auth Login (Google Sign-In / Phone OTP)
+ * @route   POST /api/v1/auth/firebase
+ * @access  Public
+ */
+const firebaseLogin = asyncHandler(async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    throw ApiError.badRequest('Firebase ID token is required');
+  }
+
+  // Verify the Firebase ID token
+  let decoded;
+  try {
+    const admin = require('../config/firebaseAdmin');
+    decoded = await admin.auth().verifyIdToken(idToken);
+  } catch (err) {
+    console.error('[firebaseLogin] Token verification failed:', err.message);
+    throw ApiError.unauthorized('Invalid or expired Firebase token');
+  }
+
+  const { uid, email, name, picture, phone_number } = decoded;
+
+  // Find existing user by firebaseUid, email, or phone
+  let user = await User.findOne({
+    $or: [
+      { firebaseUid: uid },
+      ...(email        ? [{ email }]        : []),
+      ...(phone_number ? [{ phone: phone_number }] : []),
+    ],
+  });
+
+  if (user) {
+    // Link Firebase UID if not already linked
+    if (!user.firebaseUid) {
+      user.firebaseUid = uid;
+    }
+    // Update avatar from Google if not set
+    if (picture && !user.avatar) {
+      user.avatar = picture;
+    }
+    user.lastLogin = new Date();
+    user.loginCount += 1;
+    await user.save({ validateBeforeSave: false });
+  } else {
+    // Create new user from Firebase data
+    const nameParts  = (name || 'User').split(' ');
+    const firstName  = nameParts[0] || 'User';
+    const lastName   = nameParts.slice(1).join(' ') || '';
+
+    user = await User.create({
+      firebaseUid:  uid,
+      firstName,
+      lastName,
+      email:        email        || `${uid}@firebase.user`,
+      phone:        phone_number || '',
+      avatar:       picture      || '',
+      authProvider: email ? 'google' : 'phone',
+      role:         'user',
+      status:       'active',
+      isVerified:   true,
+      password:     require('crypto').randomBytes(32).toString('hex'), // secure dummy
+      lastLogin:    new Date(),
+      loginCount:   1,
+    });
+  }
+
+  if (user.status === 'suspended') {
+    throw ApiError.forbidden('Your account has been suspended. Contact support.');
+  }
+  if (user.status === 'banned') {
+    throw ApiError.forbidden('Your account has been permanently banned.');
+  }
+
+  sendTokenResponse(user, 200, 'Login successful', res);
+});
+
+/**
  * @desc    Refresh access token
  * @route   POST /api/v1/auth/refresh-token
  * @access  Public
@@ -297,7 +375,6 @@ const updateUserStatus = asyncHandler(async (req, res) => {
     throw ApiError.badRequest(`Status must be one of: ${allowed.join(', ')}`);
   }
 
-  // Prevent admin from suspending themselves
   if (req.params.id === req.user.id.toString()) {
     throw ApiError.badRequest('You cannot change your own account status.');
   }
@@ -385,7 +462,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
   const user = await User.findOne({ email: email.toLowerCase().trim() });
 
-  // Always return success — don't reveal if email exists (security)
   if (!user) {
     return ApiResponse.success(res, {
       data: null,
@@ -393,16 +469,13 @@ const forgotPassword = asyncHandler(async (req, res) => {
     });
   }
 
-  // Generate 6-digit OTP
   const crypto = require('crypto');
   const otp    = Math.floor(100000 + Math.random() * 900000).toString();
 
-  // Store hashed OTP + 10-minute expiry
   user.resetPasswordToken  = crypto.createHash('sha256').update(otp).digest('hex');
-  user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+  user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
   await user.save({ validateBeforeSave: false });
 
-  // Try to send email
   const { sendEmail } = require('../utils/mailer');
   const emailResult = await sendEmail({
     to:      user.email,
@@ -431,7 +504,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
     `,
   });
 
-  // In dev (no SMTP), include OTP hint in response so dev can test
   const devNote = (!emailResult.success && process.env.NODE_ENV !== 'production')
     ? { devOtp: otp, devNote: 'SMTP not configured — OTP shown here for dev/testing only' }
     : {};
@@ -470,7 +542,6 @@ const resetPassword = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Invalid or expired OTP. Please request a new one.');
   }
 
-  // Set new password and clear reset fields
   user.password            = newPassword;
   user.resetPasswordToken  = undefined;
   user.resetPasswordExpire = undefined;
@@ -485,6 +556,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 module.exports = {
   register,
   login,
+  firebaseLogin,
   refreshToken,
   getMe,
   updateProfile,
