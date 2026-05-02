@@ -95,7 +95,7 @@ const firebaseLogin = asyncHandler(async (req, res) => {
   // Verify the Firebase ID token
   let decoded;
   try {
-    const admin = require('../config/firebaseAdmin');
+    const admin = require('../config/firebase');
     decoded = await admin.auth().verifyIdToken(idToken);
   } catch (err) {
     console.error('[firebaseLogin] Token verification failed:', err.message);
