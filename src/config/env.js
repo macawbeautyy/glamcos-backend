@@ -58,6 +58,12 @@ const config = {
     uploadPath: process.env.FILE_UPLOAD_PATH || './public/uploads',
   },
 
+  // Razorpay
+  razorpay: {
+    keyId:     process.env.RAZORPAY_KEY_ID     || '',
+    keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+  },
+
   // Logging
   logging: {
     level: process.env.LOG_LEVEL || 'debug',
