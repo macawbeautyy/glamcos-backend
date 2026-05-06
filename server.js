@@ -87,6 +87,10 @@ app.use(
 //  Body Parsing & Compression
 // =====================================================
 
+// AI vision route needs a much larger limit for base64 images
+// This MUST be registered before the global 10kb parser so it wins
+app.use(`/api/${config.apiVersion}/ai`, express.json({ limit: '12mb' }));
+
 // Parse JSON bodies (limit 10kb to prevent abuse)
 app.use(express.json({ limit: '10kb' }));
 
