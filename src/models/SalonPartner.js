@@ -9,17 +9,17 @@ const salonPartnerSchema = new mongoose.Schema({
 
   // Salon info
   salonName:   { type: String, required: true, trim: true },
-  yearsOld:    { type: Number, required: true },          // how old the salon is
+  yearsOld:    { type: Number, required: true },
   address:     { type: String, required: true, trim: true },
   city:        { type: String, required: true, trim: true },
   pincode:     { type: String, required: true, trim: true },
 
   // Business info
-  avgMonthlySale: { type: Number, required: true },       // in ₹
-  seatingCapacity:{ type: Number, required: true },       // number of chairs
+  avgMonthlySale:  { type: Number, required: true },
+  seatingCapacity: { type: Number, required: true },
   hasGst:      { type: Boolean, default: false },
   gstNumber:   { type: String, trim: true },
-  services:    [{ type: String }],                        // e.g. ['Hair', 'Nails', 'Skin']
+  services:    [{ type: String }],
 
   // Appointment booking interest
   enableBooking: { type: Boolean, default: true },

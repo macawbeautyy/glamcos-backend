@@ -16,7 +16,6 @@ function geocode(address, city, pincode) {
           if (results && results[0]) {
             resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
           } else {
-            // Fallback: try just city
             const q2 = encodeURIComponent(`${city}, India`);
             const url2 = `https://nominatim.openstreetmap.org/search?q=${q2}&format=json&limit=1`;
             https.get(url2, opts, (res2) => {
@@ -26,11 +25,11 @@ function geocode(address, city, pincode) {
                 try {
                   const r2 = JSON.parse(raw2);
                   resolve(r2[0] ? { lat: parseFloat(r2[0].lat), lng: parseFloat(r2[0].lon) } : {});
-                } catch { resolve({}); }
+                } catch(e) { resolve({}); }
               });
             }).on('error', () => resolve({}));
           }
-        } catch { resolve({}); }
+        } catch(e) { resolve({}); }
       });
     }).on('error', () => resolve({}));
   });
@@ -45,7 +44,6 @@ exports.apply = async (req, res) => {
       seatingCapacity, hasGst, gstNumber, services, enableBooking,
     } = req.body;
 
-    // Prevent duplicate pending applications from same phone
     const existing = await SalonPartner.findOne({ phone, status: 'pending' });
     if (existing) {
       return res.status(409).json({ message: 'An application from this phone number is already under review.' });
@@ -56,7 +54,7 @@ exports.apply = async (req, res) => {
       address, city, pincode, avgMonthlySale,
       seatingCapacity, hasGst, gstNumber, services,
       enableBooking,
-      userId: req.user?._id,
+      userId: req.user ? req.user._id : undefined,
     });
 
     res.status(201).json({ message: 'Application submitted successfully!', partner });
@@ -88,7 +86,7 @@ exports.list = async (req, res) => {
   }
 };
 
-// PATCH /api/v1/salon-partners/:id/status  — approve/reject/reset (admin)
+// PATCH /api/v1/salon-partners/:id/status  — approve/reject (admin)
 exports.updateStatus = async (req, res) => {
   try {
     const { status, adminNote } = req.body;
@@ -98,7 +96,6 @@ exports.updateStatus = async (req, res) => {
 
     const updates = { status, adminNote, reviewedAt: new Date(), reviewedBy: req.user._id };
 
-    // Auto-geocode when approving (so the map has stored coordinates)
     if (status === 'approved') {
       const salon = await SalonPartner.findById(req.params.id);
       if (salon && (!salon.lat || !salon.lng)) {
