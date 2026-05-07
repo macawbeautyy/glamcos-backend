@@ -8,7 +8,5 @@ router.post('/',     optionalAuth, ctrl.apply);       // submit application (aut
 router.get('/my',    protect,      ctrl.myStatus);    // check own application status
 
 // Admin routes
-router.get('/',               protect, authorize('admin'), ctrl.list);
-router.patch('/:id/status',   protect, authorize('admin'), ctrl.updateStatus);
-
-module.exports = router;
+router.get('/',               protect, authorize('admin', 'superadmin'), ctrl.list);
+router.patch('/:id/status',   protect, authorize('admin', 'superadmin'), ctrl.updateStatus)

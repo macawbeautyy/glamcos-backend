@@ -7,7 +7,7 @@ router.get('/salons',               ctrl.listSalons);                          /
 router.get('/slots/:partnerId',     ctrl.getSlots);                            // available slots
 router.post('/',                    optionalAuth, ctrl.book);                  // book a slot
 router.get('/my',                   protect, ctrl.myAppointments);             // user's bookings
-router.get('/partner/:partnerId',   protect, authorize('admin'), ctrl.partnerAppointments);
+router.get('/partner/:partnerId',   protect, authorize('admin', 'superadmin'), ctrl.partnerAppointments);
 router.patch('/:id/cancel',         protect, ctrl.cancel);                     // cancel
 
-module.exports = router;
+module.expo
