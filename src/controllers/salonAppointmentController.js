@@ -7,7 +7,7 @@ exports.listSalons = async (req, res) => {
     const { city } = req.query;
     const filter = { status: 'approved', enableBooking: true };
     if (city) filter.city = new RegExp(city, 'i');
-    const salons = await SalonPartner.find(filter).select('-gstNumber -userId -adminNote -reviewedBy');
+    const salons = await SalonPartner.find(filter).select('-gstNumber -userId -adminNote -reviewedBy -reviewedAt');
     res.json({ salons });
   } catch (err) {
     res.status(500).json({ message: 'Server error.' });

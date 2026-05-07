@@ -24,6 +24,10 @@ const salonPartnerSchema = new mongoose.Schema({
   // Appointment booking interest
   enableBooking: { type: Boolean, default: true },
 
+  // Map coordinates (auto-filled on approval via geocoding)
+  lat:         { type: Number },
+  lng:         { type: Number },
+
   // Status
   status:      { type: String, enum: ['pending','approved','rejected'], default: 'pending' },
   adminNote:   { type: String },
