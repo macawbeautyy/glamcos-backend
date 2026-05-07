@@ -32,6 +32,7 @@ router.use('/franchise',     require('./franchiseRoutes'));
 router.use('/salon-spaces',  require('./salonSpaceRoutes'));
 
 // ── Phase 6: Salon Partner Program ───────────────────────────────────────────
-router.use('/salon-partners', require('./salonPartnerRoutes'));
+router.use('/salon-partners',      require('./salonPartnerRoutes'));
+router.use('/salon-appointments',  require('./salonAppointmentRoutes'));
 
 module.exports = router;
