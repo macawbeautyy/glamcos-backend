@@ -28,7 +28,10 @@ router.use('/sellers',      require('./sellerRoutes'));
 router.use('/ai', aiRoutes);
 
 // ── Phase 5: Franchise & Salon Spaces ────────────────────────────────────────
-router.use('/franchise',    require('./franchiseRoutes'));
-router.use('/salon-spaces', require('./salonSpaceRoutes'));
+router.use('/franchise',     require('./franchiseRoutes'));
+router.use('/salon-spaces',  require('./salonSpaceRoutes'));
+
+// ── Phase 6: Salon Partner Program ───────────────────────────────────────────
+router.use('/salon-partners', require('./salonPartnerRoutes'));
 
 module.exports = router;
