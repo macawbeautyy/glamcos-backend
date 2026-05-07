@@ -10,4 +10,4 @@ router.get('/my',                   protect, ctrl.myAppointments);             /
 router.get('/partner/:partnerId',   protect, authorize('admin', 'superadmin'), ctrl.partnerAppointments);
 router.patch('/:id/cancel',         protect, ctrl.cancel);                     // cancel
 
-module.expo
+module.exports = router;

@@ -40,8 +40,6 @@ exports.myStatus = async (req, res) => {
   }
 };
 
-// ── Admin routes ──────────────────────────────────────────────────────────────
-
 // GET /api/v1/salon-partners  — list all (admin)
 exports.list = async (req, res) => {
   try {
@@ -54,11 +52,11 @@ exports.list = async (req, res) => {
   }
 };
 
-// PATCH /api/v1/salon-partners/:id/status  — approve/reject (admin)
+// PATCH /api/v1/salon-partners/:id/status  — approve/reject/reset (admin)
 exports.updateStatus = async (req, res) => {
   try {
     const { status, adminNote } = req.body;
-    if (!['approved', 'rejected'].includes(status)) {
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status.' });
     }
     const partner = await SalonPartner.findByIdAndUpdate(

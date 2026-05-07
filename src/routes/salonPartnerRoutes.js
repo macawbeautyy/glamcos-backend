@@ -9,4 +9,6 @@ router.get('/my',    protect,      ctrl.myStatus);    // check own application s
 
 // Admin routes
 router.get('/',               protect, authorize('admin', 'superadmin'), ctrl.list);
-router.patch('/:id/status',   protect, authorize('admin', 'superadmin'), ctrl.updateStatus)
+router.patch('/:id/status',   protect, authorize('admin', 'superadmin'), ctrl.updateStatus);
+
+module.exports = router;
