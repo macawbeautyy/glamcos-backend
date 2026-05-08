@@ -170,3 +170,42 @@ exports.updateStatus = async (req, res) => {
     res.status(500).json({ message: 'Server error.' });
   }
 };
+
+// POST /api/v1/salon-partners/my/images — upload a photo (base64)
+exports.uploadImage = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found.' });
+
+    const { image } = req.body;
+    if (!image || typeof image !== 'string') return res.status(400).json({ message: 'No image provided.' });
+    if (image.length > 2 * 1024 * 1024) return res.status(400).json({ message: 'Image too large (max ~1.5 MB).' });
+    if ((partner.images || []).length >= 10) return res.status(400).json({ message: 'Maximum 10 images allowed.' });
+
+    partner.images = [...(partner.images || []), image];
+    await partner.save();
+    res.json({ message: 'Image uploaded.', images: partner.images });
+  } catch (err) {
+    console.error('uploadImage error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// DELETE /api/v1/salon-partners/my/images/:index — delete a photo by index
+exports.deleteImage = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found.' });
+
+    const idx = parseInt(req.params.index, 10);
+    if (isNaN(idx) || idx < 0 || idx >= (partner.images || []).length) {
+      return res.status(400).json({ message: 'Invalid image index.' });
+    }
+
+    partner.images.splice(idx, 1);
+    await partner.save();
+    res.json({ message: 'Image deleted.', images: partner.images });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+};

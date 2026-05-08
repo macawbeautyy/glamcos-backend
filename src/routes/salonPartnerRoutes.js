@@ -9,6 +9,8 @@ router.get('/my',            protect,      ctrl.myStatus);        // check own s
 router.patch('/my',          protect,      ctrl.updateMyProfile); // owner updates own profile
 router.post('/my/staff',     protect,      ctrl.addStaff);        // add staff member
 router.delete('/my/staff/:staffId', protect, ctrl.removeStaff);  // remove staff member
+router.post('/my/images',            protect,      ctrl.uploadImage);     // upload a photo (base64)
+router.delete('/my/images/:index',   protect,      ctrl.deleteImage);     // delete a photo by index
 
 // Admin routes
 router.get('/',             protect, authorize('admin','superadmin'), ctrl.list);
