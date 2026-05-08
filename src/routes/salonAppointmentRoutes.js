@@ -3,11 +3,13 @@ const router  = express.Router();
 const ctrl    = require('../controllers/salonAppointmentController');
 const { protect, authorize, optionalAuth } = require('../middleware/auth');
 
-router.get('/salons',               ctrl.listSalons);                          // list approved salons
-router.get('/slots/:partnerId',     ctrl.getSlots);                            // available slots
-router.post('/',                    optionalAuth, ctrl.book);                  // book a slot
-router.get('/my',                   protect, ctrl.myAppointments);             // user's bookings
-router.get('/partner/:partnerId',   protect, authorize('admin', 'superadmin'), ctrl.partnerAppointments);
-router.patch('/:id/cancel',         protect, ctrl.cancel);                     // cancel
+router.get('/salons',                    ctrl.listSalons);
+router.get('/slots/:partnerId',          ctrl.getSlots);
+router.post('/',                         optionalAuth, ctrl.book);
+router.get('/my',                        protect, ctrl.myAppointments);
+router.get('/owner',                     protect, ctrl.ownerDashboard);
+router.patch('/owner/mark-seen',         protect, ctrl.markOwnerSeen);
+router.get('/partner/:partnerId',        protect, authorize('admin','superadmin'), ctrl.partnerAppointments);
+router.patch('/:id/cancel',              protect, ctrl.cancel);
 
 module.exports = router;

@@ -110,3 +110,43 @@ exports.cancel = async (req, res) => {
     res.status(500).json({ message: 'Server error.' });
   }
 };
+
+// GET /api/v1/salon-appointments/owner  — appointments for the logged-in salon owner
+exports.ownerDashboard = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found for this account.' });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const { filter = 'upcoming' } = req.query; // 'today' | 'upcoming' | 'all'
+
+    let query = { partnerId: partner._id };
+    if (filter === 'today')    query.date = today;
+    if (filter === 'upcoming') query.date = { $gte: today };
+
+    const appointments = await SalonAppointment.find(query)
+      .sort({ date: 1, timeSlot: 1 })
+      .limit(50);
+
+    const totalAll   = await SalonAppointment.countDocuments({ partnerId: partner._id });
+    const todayCount = await SalonAppointment.countDocuments({ partnerId: partner._id, date: today, status: { $ne: 'cancelled' } });
+    const newCount   = await SalonAppointment.countDocuments({ partnerId: partner._id, ownerSeen: { $ne: true }, status: { $ne: 'cancelled' } });
+
+    res.json({ appointments, salonId: partner._id, stats: { total: totalAll, today: todayCount, newBookings: newCount } });
+  } catch (err) {
+    console.error('ownerDashboard error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// PATCH /api/v1/salon-appointments/owner/mark-seen — mark all as seen by owner
+exports.markOwnerSeen = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found.' });
+    await SalonAppointment.updateMany({ partnerId: partner._id, ownerSeen: { $ne: true } }, { ownerSeen: true });
+    res.json({ message: 'Marked as seen.' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+};

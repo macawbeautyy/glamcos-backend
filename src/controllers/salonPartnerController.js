@@ -1,11 +1,11 @@
 const SalonPartner = require('../models/SalonPartner');
 const https = require('https');
 
-// ── Geocode helper — Nominatim (free, no API key) ─────────────────────────────
+// ── Geocode helper — Nominatim two-step ──────────────────────────────────────
 function geocode(address, city, pincode) {
   return new Promise((resolve) => {
-    const q = encodeURIComponent(`${address}, ${city}, ${pincode}, India`);
-    const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`;
+    const q    = encodeURIComponent(`${address}, ${city}, ${pincode}, India`);
+    const url  = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`;
     const opts = { headers: { 'User-Agent': 'GlamcosApp/1.0 (glamcoslifestyle@gmail.com)' } };
     https.get(url, opts, (res) => {
       let raw = '';
@@ -16,7 +16,7 @@ function geocode(address, city, pincode) {
           if (results && results[0]) {
             resolve({ lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) });
           } else {
-            const q2 = encodeURIComponent(`${city}, India`);
+            const q2   = encodeURIComponent(`${city}, India`);
             const url2 = `https://nominatim.openstreetmap.org/search?q=${q2}&format=json&limit=1`;
             https.get(url2, opts, (res2) => {
               let raw2 = '';
@@ -35,13 +35,14 @@ function geocode(address, city, pincode) {
   });
 }
 
-// POST /api/v1/salon-partners  — submit application
+// POST /api/v1/salon-partners — submit application
 exports.apply = async (req, res) => {
   try {
     const {
       ownerName, phone, email, salonName, yearsOld,
       address, city, pincode, avgMonthlySale,
-      seatingCapacity, hasGst, gstNumber, services, enableBooking,
+      seatingCapacity, hasGst, gstNumber, services,
+      enableBooking, lat, lng,
     } = req.body;
 
     const existing = await SalonPartner.findOne({ phone, status: 'pending' });
@@ -54,6 +55,8 @@ exports.apply = async (req, res) => {
       address, city, pincode, avgMonthlySale,
       seatingCapacity, hasGst, gstNumber, services,
       enableBooking,
+      lat:    lat  || undefined,
+      lng:    lng  || undefined,
       userId: req.user ? req.user._id : undefined,
     });
 
@@ -64,7 +67,7 @@ exports.apply = async (req, res) => {
   }
 };
 
-// GET /api/v1/salon-partners/my  — check own status
+// GET /api/v1/salon-partners/my — check own application status
 exports.myStatus = async (req, res) => {
   try {
     const partner = await SalonPartner.findOne({ userId: req.user._id }).sort({ createdAt: -1 });
@@ -74,7 +77,59 @@ exports.myStatus = async (req, res) => {
   }
 };
 
-// GET /api/v1/salon-partners  — list all (admin)
+// PATCH /api/v1/salon-partners/my — owner updates own approved salon profile
+exports.updateMyProfile = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found for this account.' });
+
+    const allowed = [
+      'salonName', 'description', 'openHours', 'address', 'city', 'pincode',
+      'avgMonthlySale', 'seatingCapacity', 'hasGst', 'gstNumber', 'services',
+      'enableBooking', 'lat', 'lng', 'images',
+    ];
+    allowed.forEach(k => { if (req.body[k] !== undefined) partner[k] = req.body[k]; });
+    await partner.save();
+    res.json({ message: 'Profile updated.', partner });
+  } catch (err) {
+    console.error('updateMyProfile error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// POST /api/v1/salon-partners/my/staff — add staff member
+exports.addStaff = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found.' });
+
+    const { name, role, bio, specialties, color } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ message: 'Staff name is required.' });
+
+    partner.staff.push({ name: name.trim(), role, bio, specialties: specialties || [], color });
+    await partner.save();
+    res.json({ message: 'Staff member added.', staff: partner.staff });
+  } catch (err) {
+    console.error('addStaff error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// DELETE /api/v1/salon-partners/my/staff/:staffId — remove staff
+exports.removeStaff = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findOne({ userId: req.user._id, status: 'approved' });
+    if (!partner) return res.status(404).json({ message: 'No approved salon found.' });
+
+    partner.staff = partner.staff.filter(s => s._id.toString() !== req.params.staffId);
+    await partner.save();
+    res.json({ message: 'Staff member removed.', staff: partner.staff });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// GET /api/v1/salon-partners — list all (admin)
 exports.list = async (req, res) => {
   try {
     const { status } = req.query;
@@ -86,7 +141,7 @@ exports.list = async (req, res) => {
   }
 };
 
-// PATCH /api/v1/salon-partners/:id/status  — approve/reject (admin)
+// PATCH /api/v1/salon-partners/:id/status — approve/reject (admin)
 exports.updateStatus = async (req, res) => {
   try {
     const { status, adminNote } = req.body;
@@ -107,11 +162,7 @@ exports.updateStatus = async (req, res) => {
       }
     }
 
-    const partner = await SalonPartner.findByIdAndUpdate(
-      req.params.id,
-      updates,
-      { new: true }
-    );
+    const partner = await SalonPartner.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!partner) return res.status(404).json({ message: 'Application not found.' });
     res.json({ message: `Application ${status}.`, partner });
   } catch (err) {
