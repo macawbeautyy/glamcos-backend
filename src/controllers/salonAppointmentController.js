@@ -1,5 +1,14 @@
 const SalonPartner     = require('../models/SalonPartner');
 const SalonAppointment = require('../models/SalonAppointment');
+const Razorpay         = require('razorpay');
+const crypto           = require('crypto');
+
+function getRazorpay() {
+  return new Razorpay({
+    key_id:     process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+  });
+}
 
 // GET /api/v1/salon-appointments/salons  — list approved partner salons
 exports.listSalons = async (req, res) => {
@@ -147,6 +156,76 @@ exports.markOwnerSeen = async (req, res) => {
     await SalonAppointment.updateMany({ partnerId: partner._id, ownerSeen: { $ne: true } }, { ownerSeen: true });
     res.json({ message: 'Marked as seen.' });
   } catch (err) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// POST /api/v1/salon-appointments/create-order
+// Creates a Razorpay order; amount in paise (100 = ₹1)
+exports.createOrder = async (req, res) => {
+  try {
+    const { amount = 100 } = req.body; // default ₹1 token
+    const instance = getRazorpay();
+    const order = await instance.orders.create({
+      amount,
+      currency: 'INR',
+      receipt: `rcpt_${Date.now()}`,
+    });
+    res.json({ orderId: order.id, amount: order.amount, currency: order.currency });
+  } catch (err) {
+    console.error('createOrder error:', err);
+    res.status(500).json({ message: 'Could not create payment order.' });
+  }
+};
+
+// POST /api/v1/salon-appointments/verify-and-book
+// Verifies Razorpay signature then books the slot
+exports.verifyAndBook = async (req, res) => {
+  try {
+    const {
+      razorpay_order_id, razorpay_payment_id, razorpay_signature,
+      partnerId, service, date, timeSlot, userName, userPhone, note, amount,
+    } = req.body;
+
+    // Signature check
+    const body     = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const expected = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(body)
+      .digest('hex');
+    if (expected !== razorpay_signature) {
+      return res.status(400).json({ message: 'Payment verification failed. Please contact support.' });
+    }
+
+    // Check partner still accepting bookings
+    const partner = await SalonPartner.findOne({ _id: partnerId, status: 'approved', enableBooking: true });
+    if (!partner) return res.status(404).json({ message: 'Salon not available for booking.' });
+
+    // Check slot not already taken
+    const conflict = await SalonAppointment.findOne({ partnerId, date, timeSlot, status: { $ne: 'cancelled' } });
+    if (conflict) return res.status(409).json({ message: 'Slot was just booked. Please pick another time.' });
+
+    const appt = await SalonAppointment.create({
+      partnerId, service, date, timeSlot, userName, userPhone, note,
+      userId:      req.user?._id,
+      paid:        true,
+      tokenAmount: amount || 100,
+      paymentId:   razorpay_payment_id,
+      orderId:     razorpay_order_id,
+    });
+
+    res.status(201).json({
+      message: 'Appointment booked and payment verified!',
+      appointment: {
+        ...appt.toObject(),
+        salonName: partner.salonName,
+        address:   partner.address,
+        city:      partner.city,
+      },
+    });
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ message: 'Slot just got booked. Please pick another time.' });
+    console.error('verifyAndBook error:', err);
     res.status(500).json({ message: 'Server error.' });
   }
 };

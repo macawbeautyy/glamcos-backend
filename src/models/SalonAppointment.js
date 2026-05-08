@@ -8,10 +8,14 @@ const salonAppointmentSchema = new mongoose.Schema({
   service:     { type: String, required: true },
   date:        { type: String, required: true },
   timeSlot:    { type: String, required: true },
-  tokenAmount: { type: Number, default: 0 },
   status:      { type: String, enum: ['booked','confirmed','completed','cancelled'], default: 'booked' },
   note:        { type: String },
   ownerSeen:   { type: Boolean, default: false },
+  // Razorpay payment
+  paid:        { type: Boolean, default: false },
+  tokenAmount: { type: Number, default: 0 },
+  paymentId:   { type: String },   // razorpay_payment_id
+  orderId:     { type: String },   // razorpay_order_id
 }, { timestamps: true });
 
 salonAppointmentSchema.index({ partnerId: 1, date: 1, timeSlot: 1 }, { unique: true });
