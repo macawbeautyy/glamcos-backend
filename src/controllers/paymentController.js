@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const Order = require('../models/Order');
+const Booking = require('../models/Booking');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -189,8 +190,5 @@ const markRazorpayFailed = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = {
-  createRazorpayOrder,
-  verifyRazorpayPayment,
-  markRazorpayFailed,
-};
+/**
+ * @desc    Create a Razorpay order for a 

@@ -5,14 +5,15 @@ const {
   createRazorpayOrder,
   verifyRazorpayPayment,
   markRazorpayFailed,
+  createRazorpayBookingOrder,
+  verifyRazorpayBookingPayment,
+  markRazorpayBookingFailed,
 } = require('../controllers/paymentController');
 
 const { protect } = require('../middleware/auth');
 
 router.use(protect);
 
+// Marketplace order payments
 router.post('/razorpay/order',  createRazorpayOrder);
-router.post('/razorpay/verify', verifyRazorpayPayment);
-router.post('/razorpay/failed', markRazorpayFailed);
-
-module.exports = router;
+router.post('/
