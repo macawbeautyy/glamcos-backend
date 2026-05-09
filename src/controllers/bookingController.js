@@ -12,7 +12,7 @@ const created = (res, data, message = 'Created')  => ApiResponse.created(res, { 
 
 // POST /api/v1/bookings  — user creates booking
 exports.createBooking = asyncHandler(async (req, res) => {
-  const { service, stylist, date, time, amount, address, notes, serviceMode, homeAddress } = req.body;
+  const { service, stylist, date, time, amount, address, notes, serviceMode, homeAddress, paymentMode } = req.body;
 
   if (!service || !date || !time || !amount) {
     throw new ApiError(400, 'service, date, time and amount are required');
@@ -28,6 +28,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
     address:     homeAddress || address,
     notes,
     serviceMode: serviceMode || 'salon',
+    paymentMode: paymentMode || 'pay_at_salon',
   });
 
   await booking.populate([
