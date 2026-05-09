@@ -555,4 +555,19 @@ const resetPassword = asyncHandler(async (req, res) => {
   });
 });
 
-module.
+module.exports = {
+  register,
+  login,
+  firebaseLogin,
+  refreshToken,
+  getMe,
+  updateProfile,
+  changePassword,
+  logout,
+  updateFCMToken,
+  updateLocation,
+  getAllUsers,
+  updateUserStatus,
+  forgotPassword,
+  resetPassword,
+};

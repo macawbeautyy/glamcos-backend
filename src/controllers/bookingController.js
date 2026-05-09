@@ -273,4 +273,7 @@ exports.getRebookingSuggestions = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(3)
     .populate('service', 'name price thumbnail category')
-    .lean(
+    .lean();
+
+  return ok(res, bookings, 'Rebooking suggestions');
+});
