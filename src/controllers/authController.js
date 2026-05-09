@@ -127,11 +127,12 @@ const firebaseLogin = asyncHandler(async (req, res) => {
     await user.save({ validateBeforeSave: false });
   } else {
     // Create new user from Firebase data
-    const nameParts  = (name || 'User').split(' ');
-    const firstName  = nameParts[0] || 'User';
-    const lastName   = nameParts.slice(1).join(' ') || '';
+    // Google accounts sometimes only provide a single display name with no last name
+    const nameParts = (name || 'User').trim().split(/\s+/);
+    const firstName = nameParts[0] || 'User';
+    const lastName  = nameParts.slice(1).join(' ') || '';
 
-    user = await User.create({
+    const newUser = new User({
       firebaseUid:  uid,
       firstName,
       lastName,
@@ -146,6 +147,7 @@ const firebaseLogin = asyncHandler(async (req, res) => {
       lastLogin:    new Date(),
       loginCount:   1,
     });
+    user = await newUser.save({ validateBeforeSave: false });
   }
 
   if (user.status === 'suspended') {
