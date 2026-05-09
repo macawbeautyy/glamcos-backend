@@ -191,4 +191,132 @@ const markRazorpayFailed = asyncHandler(async (req, res) => {
 });
 
 /**
- * @desc    Create a Razorpay order for a 
+ * @desc    Create a Razorpay order for a service booking.
+ * @route   POST /api/v1/payments/razorpay/booking-order
+ * @access  Private
+ * @body    { bookingId, amount }   amount in rupees
+ */
+const createRazorpayBookingOrder = asyncHandler(async (req, res) => {
+  const { bookingId, amount } = req.body;
+  if (!bookingId) throw ApiError.badRequest('bookingId is required');
+  if (!amount || amount <= 0) throw ApiError.badRequest('amount must be a positive number');
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) throw ApiError.notFound('Booking not found');
+  if (booking.user.toString() !== req.user.id) {
+    throw ApiError.forbidden('You can only pay for your own bookings');
+  }
+  if (booking.paymentStatus === 'paid') {
+    throw ApiError.badRequest('This booking is already paid');
+  }
+
+  const client = getRazorpayClient();
+  const amountPaise = Math.round(amount * 100);
+
+  const rzpOrder = await client.orders.create({
+    amount:   amountPaise,
+    currency: 'INR',
+    receipt:  `booking_${booking._id}`,
+    notes: {
+      bookingId: booking._id.toString(),
+      userId:    req.user.id,
+    },
+  });
+
+  booking.razorpayOrderId = rzpOrder.id;
+  booking.paymentMode     = 'pay_online';
+  await booking.save();
+
+  return ApiResponse.success(res, {
+    data: {
+      razorpayOrderId: rzpOrder.id,
+      amount:          rzpOrder.amount,
+      currency:        rzpOrder.currency,
+      keyId:           process.env.RAZORPAY_KEY_ID,
+      bookingId:       booking._id,
+    },
+    message: 'Razorpay booking order created',
+  });
+});
+
+/**
+ * @desc    Verify Razorpay payment for a service booking.
+ * @route   POST /api/v1/payments/razorpay/booking-verify
+ * @access  Private
+ * @body    { razorpayOrderId, razorpayPaymentId, razorpaySignature }
+ */
+const verifyRazorpayBookingPayment = asyncHandler(async (req, res) => {
+  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    throw ApiError.badRequest('razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
+  }
+
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
+
+  const expected = crypto
+    .createHmac('sha256', keySecret)
+    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+    .digest('hex');
+
+  const valid = crypto.timingSafeEqual(
+    Buffer.from(expected, 'hex'),
+    Buffer.from(razorpaySignature, 'hex')
+  );
+
+  if (!valid) throw ApiError.badRequest('Invalid payment signature');
+
+  const booking = await Booking.findOne({ razorpayOrderId });
+  if (!booking) throw ApiError.notFound('Booking not found for this Razorpay order id');
+  if (booking.user.toString() !== req.user.id) {
+    throw ApiError.forbidden('You cannot verify another user\'s payment');
+  }
+
+  if (booking.paymentStatus !== 'paid') {
+    booking.razorpayPaymentId = razorpayPaymentId;
+    booking.razorpaySignature = razorpaySignature;
+    booking.paymentStatus     = 'paid';
+    if (booking.status === 'pending') booking.status = 'confirmed';
+    await booking.save();
+  }
+
+  return ApiResponse.success(res, {
+    data: { bookingId: booking._id, status: booking.status, paymentStatus: booking.paymentStatus },
+    message: 'Booking payment verified successfully',
+  });
+});
+
+/**
+ * @desc    Mark a booking payment as failed.
+ * @route   POST /api/v1/payments/razorpay/booking-failed
+ * @access  Private
+ * @body    { bookingId, reason? }
+ */
+const markRazorpayBookingFailed = asyncHandler(async (req, res) => {
+  const { bookingId, reason = 'Payment failed' } = req.body;
+  if (!bookingId) throw ApiError.badRequest('bookingId is required');
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) throw ApiError.notFound('Booking not found');
+  if (booking.user.toString() !== req.user.id) {
+    throw ApiError.forbidden('You can only update your own bookings');
+  }
+
+  // Optionally keep booking alive so user can retry with pay_at_salon
+  booking.paymentStatus = 'pending';
+  await booking.save();
+
+  return ApiResponse.success(res, {
+    data: { bookingId: booking._id },
+    message: 'Payment failure recorded',
+  });
+});
+
+module.exports = {
+  createRazorpayOrder,
+  verifyRazorpayPayment,
+  markRazorpayFailed,
+  createRazorpayBookingOrder,
+  verifyRazorpayBookingPayment,
+  markRazorpayBookingFailed,
+};

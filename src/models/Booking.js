@@ -31,4 +31,11 @@ const BookingSchema = new mongoose.Schema({
   razorpayOrderId:   { type: String },
   razorpayPaymentId: { type: String },
   razorpaySignature: { type: String },
-  cancelReason: { type: Strin
+  cancelReason: { type: String },
+}, { timestamps: true });
+
+BookingSchema.index({ user: 1, createdAt: -1 });
+BookingSchema.index({ status: 1 });
+BookingSchema.index({ provider: 1, createdAt: -1 });
+
+module.exports = mongoose.model('Booking', BookingSchema);
