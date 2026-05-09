@@ -136,9 +136,9 @@ const firebaseLogin = asyncHandler(async (req, res) => {
       firebaseUid:  uid,
       firstName,
       lastName,
-      email:        email        || `${uid}@firebase.user`,
-      phone:        phone_number || '',
-      avatar:       picture      || '',
+      email:        email           || `${uid}@firebase.user`,
+      phone:        phone_number    || null,   // null so sparse unique index allows multiple Google users with no phone
+      avatar:       picture         || '',
       authProvider: email ? 'google' : 'phone',
       role:         'user',
       status:       'active',
