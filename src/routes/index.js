@@ -35,4 +35,7 @@ router.use('/salon-spaces',  require('./salonSpaceRoutes'));
 router.use('/salon-partners',      require('./salonPartnerRoutes'));
 router.use('/salon-appointments',  require('./salonAppointmentRoutes'));
 
+// ── Support Chat ──────────────────────────────────────────────────────────────
+router.use('/support',             require('./supportRoutes'));
+
 module.exports = router;
