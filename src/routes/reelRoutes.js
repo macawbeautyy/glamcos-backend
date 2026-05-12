@@ -20,6 +20,7 @@ const {
   getFollowing,
   getUserProfile,
   getSavedReels,
+  getReelStats,
 } = require('../controllers/reelController');
 
 // Multer: store file in memory (max 100 MB for videos)
@@ -50,8 +51,9 @@ router.get('/following/:userId',  getFollowing);
 router.post('/follow/:userId',    toggleFollow);
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
-router.post('/',    createReel);
-router.delete('/:id', deleteReel);
+router.post('/',          createReel);
+router.delete('/:id',     deleteReel);
+router.get('/:id/stats',  getReelStats);
 
 // ── Engagement ────────────────────────────────────────────────────────────────
 router.post('/:id/view',  incrementView);

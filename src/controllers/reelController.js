@@ -93,7 +93,7 @@ exports.uploadVideo = asyncHandler(async (req, res) => {
  * this endpoint stores the metadata + public URL.
  */
 exports.createReel = asyncHandler(async (req, res) => {
-  const { videoUrl, thumbnailUrl, caption, hashtags, duration } = req.body;
+  const { videoUrl, thumbnailUrl, caption, hashtags, duration, linkedItem } = req.body;
 
   if (!videoUrl)  throw ApiError.badRequest('videoUrl is required');
   if (![15, 30, 60].includes(Number(duration))) {
@@ -103,10 +103,11 @@ exports.createReel = asyncHandler(async (req, res) => {
   const reel = await Reel.create({
     user: req.user._id,
     videoUrl,
-    thumbnailUrl: thumbnailUrl || null,
-    caption:      caption || '',
-    hashtags:     Array.isArray(hashtags) ? hashtags : [],
-    duration:     Number(duration),
+    thumbnailUrl:  thumbnailUrl || null,
+    caption:       caption || '',
+    hashtags:      Array.isArray(hashtags) ? hashtags : [],
+    duration:      Number(duration),
+    linkedItem:    linkedItem   || undefined,
   });
 
   await reel.populate('user', 'firstName lastName avatar');
@@ -457,4 +458,58 @@ exports.getSavedReels = asyncHandler(async (req, res) => {
   }));
 
   res.json({ success: true, data: enriched });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CREATOR ANALYTICS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/reels/:id/stats
+ * Detailed stats for a single reel — only the owner or admin can access.
+ */
+exports.getReelStats = asyncHandler(async (req, res) => {
+  const reel = await Reel.findById(req.params.id)
+    .populate('user', 'firstName lastName avatar')
+    .lean();
+
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  const isOwner = reel.user._id.toString() === req.user._id.toString();
+  const isAdmin = ['admin', 'superadmin'].includes(req.user.role);
+  if (!isOwner && !isAdmin) throw ApiError.forbidden('Not authorised');
+
+  const likesCount    = reel.likes.length;
+  const savesCount    = reel.saves.length;
+  const commentsCount = reel.comments.length;
+  const views         = reel.views || 0;
+  const shares        = reel.shares || 0;
+  const engagements   = likesCount + commentsCount + savesCount + shares;
+  const engagementRate = views > 0 ? ((engagements / views) * 100).toFixed(1) : '0.0';
+
+  res.json({
+    success: true,
+    data: {
+      reel: {
+        _id:         reel._id,
+        videoUrl:    reel.videoUrl,
+        thumbnailUrl:reel.thumbnailUrl,
+        caption:     reel.caption,
+        hashtags:    reel.hashtags,
+        duration:    reel.duration,
+        linkedItem:  reel.linkedItem,
+        createdAt:   reel.createdAt,
+        isActive:    reel.isActive,
+      },
+      stats: {
+        views,
+        likesCount,
+        savesCount,
+        commentsCount,
+        shares,
+        engagements,
+        engagementRate: Number(engagementRate),
+      },
+    },
+  });
 });

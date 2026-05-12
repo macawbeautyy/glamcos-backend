@@ -41,6 +41,16 @@ const ReelSchema = new mongoose.Schema(
     shares:   { type: Number, default: 0, min: 0 },
     comments: [CommentSchema],
 
+    // Linked in-app item (product / job / service / franchise)
+    linkedItem: {
+      type:     { type: String, enum: ['product', 'job', 'service', 'franchise'], default: null },
+      itemId:   { type: mongoose.Schema.Types.ObjectId, default: null },
+      title:    { type: String, trim: true, default: '' },
+      imageUrl: { type: String, default: null },
+      price:    { type: String, default: null },   // formatted string e.g. "₹499"
+      ctaLabel: { type: String, default: null },   // "Shop Now" / "Apply" / "Book"
+    },
+
     // Moderation
     isActive:   { type: Boolean, default: true },
     isReported: { type: Boolean, default: false },
