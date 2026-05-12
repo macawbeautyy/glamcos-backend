@@ -1,7 +1,9 @@
 const express = require('express');
+const multer  = require('multer');
 const router  = express.Router();
 const { protect } = require('../middleware/auth');
 const {
+  uploadVideo,
   createReel,
   deleteReel,
   getFeed,
@@ -20,8 +22,21 @@ const {
   getSavedReels,
 } = require('../controllers/reelController');
 
+// Multer: store file in memory (max 100 MB for videos)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('video/')) cb(null, true);
+    else cb(new Error('Only video files are allowed'), false);
+  },
+});
+
 // All reel routes require authentication
 router.use(protect);
+
+// ── Video upload (bypasses Firebase Storage CORS) ─────────────────────────────
+router.post('/upload-video', upload.single('video'), uploadVideo);
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 router.get('/feed',      getFeed);

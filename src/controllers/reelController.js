@@ -3,6 +3,45 @@ const Follow       = require('../models/Follow');
 const User         = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError     = require('../utils/ApiError');
+const path         = require('path');
+const admin        = require('../config/firebase');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VIDEO UPLOAD  (multer in-memory → Firebase Storage via Admin SDK)
+// Avoids Firebase Storage CORS issues on web deployments.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/reels/upload-video
+ * Receives a video file as multipart/form-data, uploads it to Firebase Storage,
+ * and returns the public download URL.
+ *
+ * Body fields:
+ *   file   — the video file (field name: "video")
+ *   folder — optional storage path prefix (default: "reels")
+ */
+exports.uploadVideo = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest('No video file provided (field name must be "video")');
+
+  const bucket   = admin.storage().bucket();
+  const ext      = path.extname(req.file.originalname) || '.mp4';
+  const fileName = `reels/${req.user._id}/${Date.now()}${ext}`;
+  const fileRef  = bucket.file(fileName);
+
+  // Upload the in-memory buffer
+  await fileRef.save(req.file.buffer, {
+    metadata: {
+      contentType: req.file.mimetype || 'video/mp4',
+    },
+  });
+
+  // Make it publicly readable
+  await fileRef.makePublic();
+
+  const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+  res.status(201).json({ success: true, url: publicUrl });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REEL CRUD
