@@ -38,4 +38,7 @@ router.use('/salon-appointments',  require('./salonAppointmentRoutes'));
 // ── Support Chat ──────────────────────────────────────────────────────────────
 router.use('/support',             require('./supportRoutes'));
 
+// ── Phase 7: Explore / Reels ──────────────────────────────────────────────────
+router.use('/reels',               require('./reelRoutes'));
+
 module.exports = router;
