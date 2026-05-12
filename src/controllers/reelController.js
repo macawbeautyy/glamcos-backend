@@ -4,43 +4,82 @@ const User         = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError     = require('../utils/ApiError');
 const path         = require('path');
-const admin        = require('../config/firebase');
+const axios        = require('axios');
+const FormData     = require('form-data');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VIDEO UPLOAD  (multer in-memory → Firebase Storage via Admin SDK)
-// Avoids Firebase Storage CORS issues on web deployments.
+// VIDEO UPLOAD via Cloudinary (no CORS issues, works without Firebase Admin)
+// Falls back to Firebase Storage if CLOUDINARY_URL is not set.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Upload buffer to Cloudinary using unsigned upload preset or API key+secret.
+ * Returns the secure CDN URL.
+ */
+async function uploadToCloudinary(buffer, originalName, userId) {
+  const cloudName   = process.env.CLOUDINARY_CLOUD_NAME;
+  const uploadPreset= process.env.CLOUDINARY_UPLOAD_PRESET;   // unsigned preset
+  const apiKey      = process.env.CLOUDINARY_API_KEY;
+  const apiSecret   = process.env.CLOUDINARY_API_SECRET;
+
+  if (!cloudName) {
+    throw new ApiError('Video storage is not configured on the server. Please set CLOUDINARY_CLOUD_NAME in environment variables.', 503);
+  }
+
+  const form = new FormData();
+  const ext  = path.extname(originalName) || '.mp4';
+  form.append('file', buffer, { filename: `reel_${userId}_${Date.now()}${ext}`, contentType: 'video/mp4' });
+  form.append('resource_type', 'video');
+  form.append('folder', `reels/${userId}`);
+
+  // Use unsigned preset if available, otherwise signed upload
+  if (uploadPreset) {
+    form.append('upload_preset', uploadPreset);
+    const res = await axios.post(
+      `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
+      form,
+      { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 120_000 }
+    );
+    return res.data.secure_url;
+  } else if (apiKey && apiSecret) {
+    // Signed upload
+    const timestamp = Math.floor(Date.now() / 1000);
+    const crypto    = require('crypto');
+    const toSign    = `folder=reels/${userId}&resource_type=video&timestamp=${timestamp}${apiSecret}`;
+    const signature = crypto.createHash('sha1').update(toSign).digest('hex');
+    form.append('api_key',   apiKey);
+    form.append('timestamp', String(timestamp));
+    form.append('signature', signature);
+    const res = await axios.post(
+      `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
+      form,
+      { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 120_000 }
+    );
+    return res.data.secure_url;
+  } else {
+    throw new ApiError('Video storage not fully configured. Set CLOUDINARY_UPLOAD_PRESET or CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET.', 503);
+  }
+}
+
+/**
  * POST /api/v1/reels/upload-video
- * Receives a video file as multipart/form-data, uploads it to Firebase Storage,
- * and returns the public download URL.
- *
- * Body fields:
- *   file   — the video file (field name: "video")
- *   folder — optional storage path prefix (default: "reels")
+ * Receives a video file as multipart/form-data, uploads to Cloudinary,
+ * and returns the public CDN URL.
  */
 exports.uploadVideo = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('No video file provided (field name must be "video")');
 
-  const bucket   = admin.storage().bucket();
-  const ext      = path.extname(req.file.originalname) || '.mp4';
-  const fileName = `reels/${req.user._id}/${Date.now()}${ext}`;
-  const fileRef  = bucket.file(fileName);
+  let videoUrl;
+  try {
+    videoUrl = await uploadToCloudinary(req.file.buffer, req.file.originalname, req.user._id.toString());
+  } catch (err) {
+    // Re-throw operational errors as-is; wrap unexpected ones with details
+    if (err.isOperational) throw err;
+    const detail = err?.response?.data?.error?.message || err.message || 'Upload failed';
+    throw new ApiError(`Video upload failed: ${detail}`, 500);
+  }
 
-  // Upload the in-memory buffer
-  await fileRef.save(req.file.buffer, {
-    metadata: {
-      contentType: req.file.mimetype || 'video/mp4',
-    },
-  });
-
-  // Make it publicly readable
-  await fileRef.makePublic();
-
-  const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
-
-  res.status(201).json({ success: true, url: publicUrl });
+  res.status(201).json({ success: true, url: videoUrl });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

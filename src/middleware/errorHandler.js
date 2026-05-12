@@ -55,7 +55,7 @@ const errorHandler = (err, req, res, _next) => {
   // ---- Multer Errors ----
 
   if (err.code === 'LIMIT_FILE_SIZE') {
-    error = ApiError.badRequest('File too large. Maximum size is 5MB.');
+    error = ApiError.badRequest('File too large. Maximum size is 100MB for videos.');
   }
 
   if (err.code === 'LIMIT_UNEXPECTED_FILE') {
@@ -65,8 +65,9 @@ const errorHandler = (err, req, res, _next) => {
   // ---- Send Response ----
 
   const statusCode = error.statusCode || 500;
+  // Only mask unexpected 500s — let operational errors (503, custom 500s) show their message
   const message =
-    statusCode === 500 && process.env.NODE_ENV === 'production'
+    statusCode === 500 && !err.isOperational && process.env.NODE_ENV === 'production'
       ? 'Internal server error'
       : error.message || 'Internal server error';
 
