@@ -36,9 +36,11 @@ const ReelSchema = new mongoose.Schema(
 
     // Engagement
     views:    { type: Number, default: 0, min: 0 },
+    viewedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // per-user view dedup
     likes:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     saves:    [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     shares:   { type: Number, default: 0, min: 0 },
+    sharesBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // per-user share dedup
     comments: [CommentSchema],
 
     // Linked in-app item (product / job / service / franchise)

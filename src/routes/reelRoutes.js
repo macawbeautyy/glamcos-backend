@@ -4,6 +4,7 @@ const router  = express.Router();
 const { protect } = require('../middleware/auth');
 const {
   uploadVideo,
+  uploadThumbnail,
   createReel,
   deleteReel,
   getFeed,
@@ -33,11 +34,22 @@ const upload = multer({
   },
 });
 
+// Multer for thumbnail images (max 10 MB)
+const thumbUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'), false);
+  },
+});
+
 // All reel routes require authentication
 router.use(protect);
 
 // ── Video upload (bypasses Firebase Storage CORS) ─────────────────────────────
-router.post('/upload-video', upload.single('video'), uploadVideo);
+router.post('/upload-video',     upload.single('video'),         uploadVideo);
+router.post('/upload-thumbnail', thumbUpload.single('thumbnail'), uploadThumbnail);
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 router.get('/feed',      getFeed);

@@ -16,9 +16,14 @@ const FormData     = require('form-data');
  * Upload buffer to Cloudinary using unsigned upload preset or API key+secret.
  * Returns the secure CDN URL.
  */
-async function uploadToCloudinary(buffer, originalName, userId) {
+/**
+ * Generic Cloudinary uploader.
+ * resourceType: 'video' | 'image'
+ * endpoint:     e.g. 'video/upload' | 'image/upload'
+ */
+async function uploadToCloudinary(buffer, originalName, userId, resourceType = 'video', folder = null) {
   const cloudName   = process.env.CLOUDINARY_CLOUD_NAME;
-  const uploadPreset= process.env.CLOUDINARY_UPLOAD_PRESET;   // unsigned preset
+  const uploadPreset= process.env.CLOUDINARY_UPLOAD_PRESET;
   const apiKey      = process.env.CLOUDINARY_API_KEY;
   const apiSecret   = process.env.CLOUDINARY_API_SECRET;
 
@@ -26,35 +31,34 @@ async function uploadToCloudinary(buffer, originalName, userId) {
     throw new ApiError('Video storage is not configured on the server. Please set CLOUDINARY_CLOUD_NAME in environment variables.', 503);
   }
 
-  const form = new FormData();
-  const ext  = path.extname(originalName) || '.mp4';
-  form.append('file', buffer, { filename: `reel_${userId}_${Date.now()}${ext}`, contentType: 'video/mp4' });
-  form.append('resource_type', 'video');
-  form.append('folder', `reels/${userId}`);
+  const ext        = path.extname(originalName) || (resourceType === 'image' ? '.jpg' : '.mp4');
+  const contentType= resourceType === 'image' ? 'image/jpeg' : 'video/mp4';
+  const uploadFolder = folder || `reels/${userId}`;
 
-  // Use unsigned preset if available, otherwise signed upload
+  const form = new FormData();
+  form.append('file', buffer, { filename: `${resourceType}_${userId}_${Date.now()}${ext}`, contentType });
+  form.append('resource_type', resourceType);
+  form.append('folder', uploadFolder);
+
+  const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
+
   if (uploadPreset) {
     form.append('upload_preset', uploadPreset);
-    const res = await axios.post(
-      `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
-      form,
-      { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 120_000 }
-    );
+    const res = await axios.post(endpoint, form, {
+      headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 120_000,
+    });
     return res.data.secure_url;
   } else if (apiKey && apiSecret) {
-    // Signed upload
     const timestamp = Math.floor(Date.now() / 1000);
     const crypto    = require('crypto');
-    const toSign    = `folder=reels/${userId}&resource_type=video&timestamp=${timestamp}${apiSecret}`;
+    const toSign    = `folder=${uploadFolder}&resource_type=${resourceType}&timestamp=${timestamp}${apiSecret}`;
     const signature = crypto.createHash('sha1').update(toSign).digest('hex');
     form.append('api_key',   apiKey);
     form.append('timestamp', String(timestamp));
     form.append('signature', signature);
-    const res = await axios.post(
-      `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
-      form,
-      { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 120_000 }
-    );
+    const res = await axios.post(endpoint, form, {
+      headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 120_000,
+    });
     return res.data.secure_url;
   } else {
     throw new ApiError('Video storage not fully configured. Set CLOUDINARY_UPLOAD_PRESET or CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET.', 503);
@@ -71,15 +75,37 @@ exports.uploadVideo = asyncHandler(async (req, res) => {
 
   let videoUrl;
   try {
-    videoUrl = await uploadToCloudinary(req.file.buffer, req.file.originalname, req.user._id.toString());
+    videoUrl = await uploadToCloudinary(req.file.buffer, req.file.originalname, req.user._id.toString(), 'video');
   } catch (err) {
-    // Re-throw operational errors as-is; wrap unexpected ones with details
     if (err.isOperational) throw err;
     const detail = err?.response?.data?.error?.message || err.message || 'Upload failed';
     throw new ApiError(`Video upload failed: ${detail}`, 500);
   }
 
   res.status(201).json({ success: true, url: videoUrl });
+});
+
+/**
+ * POST /api/v1/reels/upload-thumbnail
+ * Receives an image file as multipart/form-data, uploads to Cloudinary,
+ * and returns the public CDN URL.
+ */
+exports.uploadThumbnail = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest('No thumbnail file provided (field name must be "thumbnail")');
+
+  let thumbnailUrl;
+  try {
+    thumbnailUrl = await uploadToCloudinary(
+      req.file.buffer, req.file.originalname,
+      req.user._id.toString(), 'image', `thumbnails/${req.user._id}`
+    );
+  } catch (err) {
+    if (err.isOperational) throw err;
+    const detail = err?.response?.data?.error?.message || err.message || 'Upload failed';
+    throw new ApiError(`Thumbnail upload failed: ${detail}`, 500);
+  }
+
+  res.status(201).json({ success: true, url: thumbnailUrl });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,8 +183,10 @@ exports.getFeed = asyncHandler(async (req, res) => {
     likesCount:    r.likes.length,
     savesCount:    r.saves.length,
     commentsCount: r.comments.length,
-    isLiked: r.likes.map(String).includes(userId),
-    isSaved: r.saves.map(String).includes(userId),
+    isLiked:  r.likes.map(String).includes(userId),
+    isSaved:  r.saves.map(String).includes(userId),
+    isShared: (r.sharesBy || []).map(String).includes(userId),
+    isViewed: (r.viewedBy || []).map(String).includes(userId),
   }));
 
   res.json({ success: true, data: enriched, page, limit });
@@ -189,8 +217,10 @@ exports.getFollowingFeed = asyncHandler(async (req, res) => {
     likesCount:    r.likes.length,
     savesCount:    r.saves.length,
     commentsCount: r.comments.length,
-    isLiked: r.likes.map(String).includes(userId),
-    isSaved: r.saves.map(String).includes(userId),
+    isLiked:  r.likes.map(String).includes(userId),
+    isSaved:  r.saves.map(String).includes(userId),
+    isShared: (r.sharesBy || []).map(String).includes(userId),
+    isViewed: (r.viewedBy || []).map(String).includes(userId),
   }));
 
   res.json({ success: true, data: enriched, page, limit });
@@ -202,15 +232,20 @@ exports.getFollowingFeed = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/v1/reels/:id/view
- * Increment view count (call when reel is played).
+ * Increment view count — deduplicated per user (each user counts only once).
  */
 exports.incrementView = asyncHandler(async (req, res) => {
-  const reel = await Reel.findByIdAndUpdate(
-    req.params.id,
-    { $inc: { views: 1 } },
+  const uid  = req.user._id;
+  const reel = await Reel.findOneAndUpdate(
+    { _id: req.params.id, viewedBy: { $ne: uid } }, // only if NOT already viewed
+    { $inc: { views: 1 }, $addToSet: { viewedBy: uid } },
     { new: true }
   );
-  if (!reel) throw ApiError.notFound('Reel not found');
+  // If reel is null the user already viewed it — just return current count
+  if (!reel) {
+    const r = await Reel.findById(req.params.id).select('views');
+    return res.json({ success: true, views: r?.views || 0, alreadyViewed: true });
+  }
   res.json({ success: true, views: reel.views });
 });
 
@@ -254,15 +289,19 @@ exports.toggleSave = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/v1/reels/:id/share
- * Increment share count.
+ * Increment share count — deduplicated per user (each user counts only once).
  */
 exports.incrementShare = asyncHandler(async (req, res) => {
-  const reel = await Reel.findByIdAndUpdate(
-    req.params.id,
-    { $inc: { shares: 1 } },
+  const uid  = req.user._id;
+  const reel = await Reel.findOneAndUpdate(
+    { _id: req.params.id, sharesBy: { $ne: uid } }, // only if NOT already shared
+    { $inc: { shares: 1 }, $addToSet: { sharesBy: uid } },
     { new: true }
   );
-  if (!reel) throw ApiError.notFound('Reel not found');
+  if (!reel) {
+    const r = await Reel.findById(req.params.id).select('shares');
+    return res.json({ success: true, shares: r?.shares || 0, alreadyShared: true });
+  }
   res.json({ success: true, shares: reel.shares });
 });
 
