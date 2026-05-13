@@ -212,6 +212,7 @@ const getMe = asyncHandler(async (req, res) => {
 const updateProfile = asyncHandler(async (req, res) => {
   const allowedFields = [
     'firstName', 'lastName', 'phone', 'avatar', 'address',
+    'username', 'bio', 'socialLink',
   ];
 
   const updates = {};
@@ -229,6 +230,64 @@ const updateProfile = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, {
     data: { user: sanitizeUser(user) },
     message: 'Profile updated successfully',
+  });
+});
+
+/**
+ * @desc    Upload avatar image (multipart/form-data, field: "avatar")
+ * @route   POST /api/v1/auth/upload-avatar
+ * @access  Private
+ */
+const uploadAvatar = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest('No image file provided');
+
+  // Reuse Cloudinary uploader from reelController pattern
+  const axios    = require('axios');
+  const FormData = require('form-data');
+  const path     = require('path');
+
+  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
+  const apiKey       = process.env.CLOUDINARY_API_KEY;
+  const apiSecret    = process.env.CLOUDINARY_API_SECRET;
+
+  if (!cloudName) throw ApiError.serviceUnavailable('Image storage not configured');
+
+  const userId = req.user.id;
+  const ext    = path.extname(req.file.originalname) || '.jpg';
+  const folder = `avatars/${userId}`;
+  const form   = new FormData();
+  form.append('file', req.file.buffer, { filename: `avatar_${userId}_${Date.now()}${ext}`, contentType: 'image/jpeg' });
+  form.append('resource_type', 'image');
+  form.append('folder', folder);
+
+  let avatarUrl;
+  if (uploadPreset) {
+    form.append('upload_preset', uploadPreset);
+    const r = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, form, {
+      headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000,
+    });
+    avatarUrl = r.data.secure_url;
+  } else if (apiKey && apiSecret) {
+    const crypto    = require('crypto');
+    const timestamp = Math.floor(Date.now() / 1000);
+    const toSign    = `folder=${folder}&resource_type=image&timestamp=${timestamp}${apiSecret}`;
+    const signature = crypto.createHash('sha1').update(toSign).digest('hex');
+    form.append('api_key', apiKey);
+    form.append('timestamp', String(timestamp));
+    form.append('signature', signature);
+    const r = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, form, {
+      headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000,
+    });
+    avatarUrl = r.data.secure_url;
+  } else {
+    throw ApiError.serviceUnavailable('Cloudinary credentials not configured');
+  }
+
+  const user = await User.findByIdAndUpdate(userId, { avatar: avatarUrl }, { new: true });
+  return ApiResponse.success(res, {
+    data: { avatarUrl, user: sanitizeUser(user) },
+    message: 'Avatar uploaded successfully',
   });
 });
 
@@ -562,6 +621,7 @@ module.exports = {
   refreshToken,
   getMe,
   updateProfile,
+  uploadAvatar,
   changePassword,
   logout,
   updateFCMToken,

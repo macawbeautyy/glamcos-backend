@@ -38,6 +38,29 @@ const UserSchema = new mongoose.Schema(
       default: null,
     },
 
+    // --- Creator / Social Profile ---
+    username: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      unique: true,
+      sparse: true,          // allow many nulls
+      maxlength: [30, 'Username cannot exceed 30 characters'],
+      match: [/^[a-z0-9._]+$/, 'Username can only contain letters, numbers, dots and underscores'],
+    },
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: [160, 'Bio cannot exceed 160 characters'],
+      default: null,
+    },
+    socialLink: {
+      type: String,
+      trim: true,
+      maxlength: [200, 'Social link cannot exceed 200 characters'],
+      default: null,
+    },
+
     // --- Auth ---
     password: {
       type: String,

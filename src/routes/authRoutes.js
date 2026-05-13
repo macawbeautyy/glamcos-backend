@@ -1,4 +1,5 @@
 const express = require('express');
+const multer  = require('multer');
 const router = express.Router();
 const { firebaseLogin } = require('../controllers/authController');
 
@@ -8,6 +9,7 @@ const {
   refreshToken,
   getMe,
   updateProfile,
+  uploadAvatar,
   changePassword,
   logout,
   updateFCMToken,
@@ -21,6 +23,16 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimiter');
 const { validate } = require('../middleware/validate');
+
+// Multer: avatar image upload (max 5 MB, images only)
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'), false);
+  },
+});
 
 // ── Validation Rules ──────────────────────────────────────────────────────────
 
@@ -53,6 +65,7 @@ router.post('/firebase',       authLimiter, firebaseLogin);
 // ── Protected Routes ──────────────────────────────────────────────────────────
 router.get('/me',              protect, getMe);
 router.put('/me',              protect, updateProfile);
+router.post('/upload-avatar',  protect, avatarUpload.single('avatar'), uploadAvatar);
 router.put('/change-password', protect, changePasswordValidation, changePassword);
 router.post('/logout',         protect, logout);
 router.put('/fcm-token',       protect, updateFCMToken);
