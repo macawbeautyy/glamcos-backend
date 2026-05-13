@@ -212,7 +212,7 @@ const getMe = asyncHandler(async (req, res) => {
 const updateProfile = asyncHandler(async (req, res) => {
   const allowedFields = [
     'firstName', 'lastName', 'phone', 'avatar', 'address',
-    'username', 'bio', 'socialLink',
+    'username', 'bio', 'socialLink', 'profileColor',
   ];
 
   const updates = {};

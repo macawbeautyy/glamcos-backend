@@ -60,6 +60,12 @@ const UserSchema = new mongoose.Schema(
       maxlength: [200, 'Social link cannot exceed 200 characters'],
       default: null,
     },
+    // Creator card gradient — stored as "color1,color2,color3"
+    profileColor: {
+      type: String,
+      trim: true,
+      default: null,
+    },
 
     // --- Auth ---
     password: {
