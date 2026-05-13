@@ -311,15 +311,80 @@ exports.incrementShare = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/v1/reels/:id/comments
+ * Returns comments enriched with isLiked, likesCount, and replies.
  */
 exports.getComments = asyncHandler(async (req, res) => {
+  const userId = req.user._id.toString();
+
   const reel = await Reel.findById(req.params.id)
     .select('comments')
-    .populate('comments.user', 'firstName lastName avatar');
+    .populate('comments.user', 'firstName lastName avatar')
+    .populate('comments.replies.user', 'firstName lastName avatar');
 
   if (!reel) throw ApiError.notFound('Reel not found');
 
-  res.json({ success: true, data: reel.comments });
+  const data = reel.comments.map(c => ({
+    ...c.toObject(),
+    isLiked:    c.likes.map(String).includes(userId),
+    likesCount: c.likes.length,
+    replies: (c.replies || []).map(r => ({
+      ...r.toObject(),
+      isLiked:    r.likes.map(String).includes(userId),
+      likesCount: r.likes.length,
+    })),
+  }));
+
+  res.json({ success: true, data });
+});
+
+/**
+ * POST /api/v1/reels/:id/comments/:commentId/like
+ * Toggle like on a comment.
+ */
+exports.likeComment = asyncHandler(async (req, res) => {
+  const { id: reelId, commentId } = req.params;
+  const userId = req.user._id;
+
+  const reel = await Reel.findById(reelId);
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  const comment = reel.comments.id(commentId);
+  if (!comment) throw ApiError.notFound('Comment not found');
+
+  const alreadyLiked = comment.likes.map(String).includes(userId.toString());
+  if (alreadyLiked) comment.likes.pull(userId);
+  else              comment.likes.push(userId);
+
+  await reel.save();
+  res.json({ success: true, liked: !alreadyLiked, likesCount: comment.likes.length });
+});
+
+/**
+ * POST /api/v1/reels/:id/comments/:commentId/reply
+ * Add a reply to a comment.
+ */
+exports.replyToComment = asyncHandler(async (req, res) => {
+  const { id: reelId, commentId } = req.params;
+  const { text } = req.body;
+
+  if (!text?.trim()) throw ApiError.badRequest('Reply text is required');
+
+  const reel = await Reel.findById(reelId);
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  const comment = reel.comments.id(commentId);
+  if (!comment) throw ApiError.notFound('Comment not found');
+
+  comment.replies.push({ user: req.user._id, text: text.trim() });
+  await reel.save();
+
+  await reel.populate('comments.replies.user', 'firstName lastName avatar');
+  const newReply = comment.replies[comment.replies.length - 1];
+
+  res.status(201).json({
+    success: true,
+    data: { ...newReply.toObject(), isLiked: false, likesCount: 0 },
+  });
 });
 
 /**

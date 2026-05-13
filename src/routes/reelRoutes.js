@@ -16,6 +16,8 @@ const {
   getComments,
   addComment,
   deleteComment,
+  likeComment,
+  replyToComment,
   toggleFollow,
   getFollowers,
   getFollowing,
@@ -74,8 +76,10 @@ router.post('/:id/save',  toggleSave);
 router.post('/:id/share', incrementShare);
 
 // ── Comments ──────────────────────────────────────────────────────────────────
-router.get('/:id/comments',              getComments);
-router.post('/:id/comments',             addComment);
-router.delete('/:reelId/comments/:commentId', deleteComment);
+router.get('/:id/comments',                          getComments);
+router.post('/:id/comments',                         addComment);
+router.delete('/:reelId/comments/:commentId',        deleteComment);
+router.post('/:id/comments/:commentId/like',         likeComment);
+router.post('/:id/comments/:commentId/reply',        replyToComment);
 
 module.exports = router;
