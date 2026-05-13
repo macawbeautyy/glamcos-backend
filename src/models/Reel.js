@@ -1,11 +1,22 @@
 const mongoose = require('mongoose');
 
+// ── Reply sub-schema ──────────────────────────────────────────────────────────
+const ReplySchema = new mongoose.Schema(
+  {
+    user:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    text:  { type: String, required: true, trim: true, maxlength: 500 },
+    likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  },
+  { timestamps: true }
+);
+
 // ── Comment sub-schema ────────────────────────────────────────────────────────
 const CommentSchema = new mongoose.Schema(
   {
     user:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     text:    { type: String, required: true, trim: true, maxlength: 500 },
     likes:   [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    replies: [ReplySchema],
   },
   { timestamps: true }
 );
