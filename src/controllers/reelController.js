@@ -488,7 +488,7 @@ exports.getUserProfile = asyncHandler(async (req, res) => {
   const targetId = req.params.userId;
   const meId     = req.user._id.toString();
 
-  const user = await User.findById(targetId).select('firstName lastName avatar bio createdAt');
+  const user = await User.findById(targetId).select('firstName lastName avatar bio username socialLink profileColor createdAt');
   if (!user) throw ApiError.notFound('User not found');
 
   // Parallel fetches
