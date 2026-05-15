@@ -171,7 +171,13 @@ exports.createOrder = async (req, res) => {
       currency: 'INR',
       receipt: `rcpt_${Date.now()}`,
     });
-    res.json({ orderId: order.id, amount: order.amount, currency: order.currency });
+    // Return keyId so the client never needs to store Razorpay keys locally
+    res.json({
+      orderId:  order.id,
+      amount:   order.amount,
+      currency: order.currency,
+      keyId:    process.env.RAZORPAY_KEY_ID,
+    });
   } catch (err) {
     console.error('createOrder error:', err);
     res.status(500).json({ message: 'Could not create payment order.' });

@@ -88,6 +88,10 @@ services:
       - key: LOG_FILE
         value: logs/app.log
 
+      # Gemini AI API (required for AI stylist feature)
+      - key: GEMINI_API_KEY
+        sync: false
+
       # Firebase (optional — leave blank if not using push notifications)
       - key: FIREBASE_PROJECT_ID
         sync: false

@@ -56,7 +56,7 @@ app.use(
       // Allow requests with no origin (mobile apps, curl, Postman)
       if (!origin) return callback(null, true);
 
-      if (config.cors.origins.includes(origin) || config.env === 'development') {
+      if (config.cors.origins.includes(origin)) {
         return callback(null, true);
       }
 
@@ -110,10 +110,8 @@ app.use(requestId);
 // HTTP request logging
 app.use(requestLogger());
 
-// Global rate limiter
-if (config.env === 'production') {
-  app.use('/api', apiLimiter);
-}
+// Global rate limiter — always active
+app.use('/api', apiLimiter);
 
 // =====================================================
 //  Static Files

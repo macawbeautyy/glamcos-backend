@@ -565,12 +565,15 @@ const forgotPassword = asyncHandler(async (req, res) => {
     `,
   });
 
-  const devNote = (!emailResult.success && process.env.NODE_ENV !== 'production')
-    ? { devOtp: otp, devNote: 'SMTP not configured — OTP shown here for dev/testing only' }
-    : {};
+  // SECURITY: Never expose OTP in API responses under any circumstances.
+  // If SMTP is not configured, log server-side only so developers can check logs.
+  if (!emailResult.success) {
+    const logger = require('../utils/logger');
+    logger.warn(`[forgotPassword] SMTP delivery failed for ${user.email}. Check mailer config.`);
+  }
 
   return ApiResponse.success(res, {
-    data: devNote,
+    data: null,
     message: 'If this email is registered, an OTP has been sent.',
   });
 });

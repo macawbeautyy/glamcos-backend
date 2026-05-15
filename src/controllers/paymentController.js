@@ -194,12 +194,11 @@ const markRazorpayFailed = asyncHandler(async (req, res) => {
  * @desc    Create a Razorpay order for a service booking.
  * @route   POST /api/v1/payments/razorpay/booking-order
  * @access  Private
- * @body    { bookingId, amount }   amount in rupees
+ * @body    { bookingId }   amount is fetched from the booking record — never trusted from client
  */
 const createRazorpayBookingOrder = asyncHandler(async (req, res) => {
-  const { bookingId, amount } = req.body;
+  const { bookingId } = req.body;
   if (!bookingId) throw ApiError.badRequest('bookingId is required');
-  if (!amount || amount <= 0) throw ApiError.badRequest('amount must be a positive number');
 
   const booking = await Booking.findById(bookingId);
   if (!booking) throw ApiError.notFound('Booking not found');
@@ -210,8 +209,14 @@ const createRazorpayBookingOrder = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('This booking is already paid');
   }
 
+  // SECURITY: Always use the server-stored booking amount — never trust client-supplied amounts.
+  const serverAmount = booking.amount;
+  if (!serverAmount || serverAmount <= 0) {
+    throw ApiError.internal('Booking has an invalid amount. Please contact support.');
+  }
+
   const client = getRazorpayClient();
-  const amountPaise = Math.round(amount * 100);
+  const amountPaise = Math.round(serverAmount * 100);
 
   const rzpOrder = await client.orders.create({
     amount:   amountPaise,
