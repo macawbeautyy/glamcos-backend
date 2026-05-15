@@ -4,6 +4,7 @@ const Booking = require('../models/Booking');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
+const { Notif } = require('../services/notifications');
 
 /**
  * Razorpay integration.
@@ -283,6 +284,13 @@ const verifyRazorpayBookingPayment = asyncHandler(async (req, res) => {
     booking.paymentStatus     = 'paid';
     if (booking.status === 'pending') booking.status = 'confirmed';
     await booking.save();
+
+    // Notify user of successful payment (non-blocking)
+    Notif.paymentSuccess(booking.user, {
+      bookingId:   booking._id,
+      amount:      booking.amount,
+      serviceName: 'your booking',
+    }).catch(() => {});
   }
 
   return ApiResponse.success(res, {

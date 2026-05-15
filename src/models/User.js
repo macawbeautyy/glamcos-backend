@@ -191,7 +191,16 @@ const UserSchema = new mongoose.Schema(
     // --- Metadata ---
     lastLogin: Date,
     loginCount: { type: Number, default: 0 },
-    fcmTokens: [String], // Firebase push notification tokens
+    fcmTokens: [String], // Expo push notification tokens
+    notifPrefs: {
+      booking_alerts:  { type: Boolean, default: true },
+      payment_alerts:  { type: Boolean, default: true },
+      order_alerts:    { type: Boolean, default: true },
+      social_alerts:   { type: Boolean, default: true },
+      provider_alerts: { type: Boolean, default: true },
+      promotions:      { type: Boolean, default: true },
+      reminders:       { type: Boolean, default: true },
+    },
     deviceInfo: [
       {
         deviceId: String,

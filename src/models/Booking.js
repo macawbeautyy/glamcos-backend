@@ -32,6 +32,12 @@ const BookingSchema = new mongoose.Schema({
   razorpayPaymentId: { type: String },
   razorpaySignature: { type: String },
   cancelReason: { type: String },
+  // User rating after service completion
+  review: {
+    rating:    { type: Number, min: 1, max: 5 },
+    comment:   { type: String, maxlength: 500 },
+    createdAt: { type: Date },
+  },
 }, { timestamps: true });
 
 BookingSchema.index({ user: 1, createdAt: -1 });

@@ -16,6 +16,8 @@ const {
   getProviderStatus,
   switchMode,
   acknowledgeProviderWelcome,
+  getProviderReviews,
+  updateServicesOffered,
 } = require('../controllers/providerController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -26,11 +28,13 @@ router.post('/kyc',                protect, submitKYC);
 router.post('/bank',               protect, submitBankDetails);
 router.get('/me',                  protect, getMyProviderProfile);
 router.put('/availability',        protect, updateAvailability);
+router.put('/services',            protect, updateServicesOffered);
 router.get('/dashboard',           protect, getProviderDashboard);
 router.get('/earnings',            protect, getProviderEarnings);
 
 // ── Dual-Role System routes ───────────────────────────────────────────────────
 router.get('/status',              protect, getProviderStatus);
+router.get('/reviews',             protect, getProviderReviews);
 router.put('/switch-mode',         protect, switchMode);
 router.put('/acknowledge-welcome', protect, acknowledgeProviderWelcome);
 

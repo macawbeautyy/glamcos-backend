@@ -38,6 +38,9 @@ router.use('/salon-appointments',  require('./salonAppointmentRoutes'));
 // ── Support Chat ──────────────────────────────────────────────────────────────
 router.use('/support',             require('./supportRoutes'));
 
+// ── Admin Notifications ───────────────────────────────────────────────────────
+router.use('/notifications',       require('./notificationRoutes'));
+
 // ── Phase 7: Explore / Reels ──────────────────────────────────────────────────
 router.use('/reels',               require('./reelRoutes'));
 

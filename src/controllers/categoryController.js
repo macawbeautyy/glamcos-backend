@@ -26,7 +26,9 @@ const getCategories = asyncHandler(async (req, res) => {
   if (req.query.parent === 'null') filter.parent = null; // Top-level only
   if (req.query.featured === 'true') filter.isFeatured = true;
   if (req.query.search) {
-    filter.name = { $regex: req.query.search, $options: 'i' };
+    // Escape special regex chars to prevent ReDoS
+    const escaped = req.query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+    filter.name = { $regex: escaped, $options: 'i' };
   }
 
   const [categories, total] = await Promise.all([

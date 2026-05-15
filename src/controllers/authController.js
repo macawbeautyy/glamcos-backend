@@ -369,6 +369,34 @@ const updateFCMToken = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @desc    Update notification preferences for the logged-in user.
+ * @route   PUT /api/v1/auth/notif-prefs
+ * @access  Private
+ * @body    { booking_alerts?, payment_alerts?, order_alerts?, social_alerts?, provider_alerts?, promotions?, reminders? }
+ */
+const updateNotifPrefs = asyncHandler(async (req, res) => {
+  const ALLOWED_KEYS = ['booking_alerts', 'payment_alerts', 'order_alerts', 'social_alerts', 'provider_alerts', 'promotions', 'reminders'];
+
+  const user = await User.findById(req.user.id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  if (!user.notifPrefs) user.notifPrefs = {};
+
+  for (const key of ALLOWED_KEYS) {
+    if (typeof req.body[key] === 'boolean') {
+      user.notifPrefs[key] = req.body[key];
+    }
+  }
+  user.markModified('notifPrefs');
+  await user.save({ validateBeforeSave: false });
+
+  return ApiResponse.success(res, {
+    data: user.notifPrefs,
+    message: 'Notification preferences updated',
+  });
+});
+
+/**
  * @desc    Admin: Get all users (filterable by role / status)
  * @route   GET /api/v1/auth/admin/users
  * @access  Admin
@@ -628,6 +656,7 @@ module.exports = {
   changePassword,
   logout,
   updateFCMToken,
+  updateNotifPrefs,
   updateLocation,
   getAllUsers,
   updateUserStatus,

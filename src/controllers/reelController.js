@@ -6,6 +6,7 @@ const ApiError     = require('../utils/ApiError');
 const path         = require('path');
 const axios        = require('axios');
 const FormData     = require('form-data');
+const { Notif }    = require('../services/notifications');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VIDEO UPLOAD via Cloudinary (no CORS issues, works without Firebase Admin)
@@ -265,6 +266,16 @@ exports.toggleLike = asyncHandler(async (req, res) => {
   else        reel.likes.splice(idx, 1);
 
   await reel.save();
+
+  // Notify creator on new like (not on unlike, not on self-like)
+  if (liked && reel.user && reel.user.toString() !== uid.toString()) {
+    const liker = await User.findById(uid).select('firstName').lean();
+    Notif.reelLiked(reel.user, {
+      likerName: liker?.firstName || 'Someone',
+      reelId:    reel._id,
+    }).catch(() => {});
+  }
+
   res.json({ success: true, liked, likesCount: reel.likes.length });
 });
 
@@ -403,6 +414,16 @@ exports.addComment = asyncHandler(async (req, res) => {
   const newComment = reel.comments[reel.comments.length - 1];
   await reel.populate('comments.user', 'firstName lastName avatar');
 
+  // Notify creator (non-blocking, skip self-comments)
+  if (reel.user && reel.user.toString() !== req.user._id.toString()) {
+    const commenter = await User.findById(req.user._id).select('firstName').lean();
+    Notif.reelComment(reel.user, {
+      commenterName: commenter?.firstName || 'Someone',
+      comment:       text.trim(),
+      reelId:        reel._id,
+    }).catch(() => {});
+  }
+
   const populated = reel.comments.id(newComment._id);
   res.status(201).json({ success: true, data: populated, commentsCount: reel.comments.length });
 });
@@ -450,6 +471,14 @@ exports.toggleFollow = asyncHandler(async (req, res) => {
     res.json({ success: true, following: false });
   } else {
     await Follow.create({ follower: meId, following: targetId });
+
+    // Notify target user (non-blocking)
+    const follower = await User.findById(meId).select('firstName').lean();
+    Notif.newFollower(targetId, {
+      followerName: follower?.firstName || 'Someone',
+      followerId:   meId,
+    }).catch(() => {});
+
     res.json({ success: true, following: true });
   }
 });

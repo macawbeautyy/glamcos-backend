@@ -13,6 +13,7 @@ const {
   changePassword,
   logout,
   updateFCMToken,
+  updateNotifPrefs,
   updateLocation,
   getAllUsers,
   updateUserStatus,
@@ -69,6 +70,7 @@ router.post('/upload-avatar',  protect, avatarUpload.single('avatar'), uploadAva
 router.put('/change-password', protect, changePasswordValidation, changePassword);
 router.post('/logout',         protect, logout);
 router.put('/fcm-token',       protect, updateFCMToken);
+router.put('/notif-prefs',     protect, updateNotifPrefs);
 router.put('/location',        protect, updateLocation);
 
 // ── Admin Routes ──────────────────────────────────────────────────────────────

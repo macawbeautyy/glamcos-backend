@@ -31,6 +31,7 @@ const requestLogger = require('./src/middleware/requestLogger');
 const requestId = require('./src/middleware/requestId');
 const { apiLimiter } = require('./src/middleware/rateLimiter');
 const { errorHandler, notFoundHandler } = require('./src/middleware/errorHandler');
+const { startNotificationJobs } = require('./src/jobs/notificationJobs');
 
 // =====================================================
 //  Initialize Express App
@@ -173,6 +174,9 @@ const startServer = async () => {
 
     // Then connect to MongoDB
     await connectDB();
+
+    // Start scheduled notification jobs (non-blocking)
+    startNotificationJobs();
 
     // ... rest of your error handlers
 

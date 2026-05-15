@@ -6,6 +6,7 @@ const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
 const { parsePagination } = require('../utils/helpers');
+const { Notif } = require('../services/notifications');
 
 const DEFAULT_DELIVERY_FEE  = 49;        // ₹ flat
 const FREE_DELIVERY_AT      = 499;       // orders above this total get free delivery
@@ -146,6 +147,12 @@ const createOrder = asyncHandler(async (req, res) => {
     .populate('items.product', 'name slug thumbnail')
     .populate('items.seller', 'firstName lastName vendorProfile.shopName');
 
+  // Notify user (non-blocking)
+  Notif.orderPlaced(req.user.id, {
+    orderId:     order._id,
+    orderNumber: order.orderNumber,
+  }).catch(() => {});
+
   return ApiResponse.created(res, {
     data: populated,
     message: 'Order placed successfully',
@@ -241,6 +248,11 @@ const cancelOrder = asyncHandler(async (req, res) => {
   }
   await order.save();
 
+  Notif.orderCancelled(order.user, {
+    orderId:     order._id,
+    orderNumber: order.orderNumber,
+  }).catch(() => {});
+
   return ApiResponse.success(res, {
     data: order,
     message: 'Order cancelled',
@@ -325,6 +337,20 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 
   await order.save();
+
+  // Fire shipped/delivered notifications (non-blocking)
+  if (order.status === 'shipped') {
+    Notif.orderShipped(order.user, {
+      orderId:     order._id,
+      orderNumber: order.orderNumber,
+      trackingId:  trackingNumber || null,
+    }).catch(() => {});
+  } else if (order.status === 'delivered') {
+    Notif.orderDelivered(order.user, {
+      orderId:     order._id,
+      orderNumber: order.orderNumber,
+    }).catch(() => {});
+  }
 
   return ApiResponse.success(res, {
     data: order,

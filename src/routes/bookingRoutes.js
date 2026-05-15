@@ -13,6 +13,7 @@ const {
   updateBookingStatus,
   cancelBooking,
   getRebookingSuggestions,
+  submitReview,
 } = require('../controllers/bookingController');
 
 // ── User routes ───────────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ router.post('/',                          protect, createBooking);
 router.get('/',                           protect, getUserBookings);
 router.get('/rebooking-suggestions',      protect, getRebookingSuggestions);
 router.put('/:id/cancel',                 protect, cancelBooking);
+router.post('/:id/review',                protect, submitReview);
 
 // ── Provider routes ───────────────────────────────────────────────────────────
 // Provider sees their assigned bookings + pending pool

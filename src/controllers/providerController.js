@@ -399,6 +399,63 @@ const acknowledgeProviderWelcome = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: null, message: 'Welcome acknowledged' });
 });
 
+// ── Provider: Update services offered ────────────────────────────────────────
+// PUT /api/v1/providers/services
+const updateServicesOffered = asyncHandler(async (req, res) => {
+  const { servicesOffered } = req.body;
+  if (!Array.isArray(servicesOffered)) {
+    throw new ApiError(400, 'servicesOffered must be an array of service IDs');
+  }
+
+  const provider = await Provider.findOneAndUpdate(
+    { user: req.user.id },
+    { servicesOffered },
+    { new: true }
+  ).populate('servicesOffered', 'name price thumbnail');
+
+  if (!provider) throw new ApiError(404, 'Provider profile not found');
+
+  return ApiResponse.success(res, {
+    data: provider.servicesOffered,
+    message: 'Services updated successfully',
+  });
+});
+
+// ── Provider: Get reviews for my bookings ─────────────────────────────────────
+// GET /api/v1/providers/reviews
+const getProviderReviews = asyncHandler(async (req, res) => {
+  const Booking = require('../models/Booking');
+
+  // Find the provider record linked to this user
+  const providerRecord = await Provider.findOne({ user: req.user.id }).lean();
+  if (!providerRecord) {
+    return ApiResponse.success(res, { data: [], message: 'No provider profile found' });
+  }
+
+  // Find all completed bookings assigned to this provider that have a review
+  const bookings = await Booking.find({
+    provider: providerRecord._id,
+    status: 'completed',
+    'review.rating': { $exists: true, $ne: null },
+  })
+    .populate('user',    'firstName lastName')
+    .populate('service', 'name')
+    .sort({ 'review.createdAt': -1 })
+    .lean();
+
+  // Shape into the format the provider panel expects
+  const reviews = bookings.map((b) => ({
+    _id:         b._id,
+    rating:      b.review.rating,
+    review:      b.review.comment || '',
+    user:        b.user  || { firstName: 'Anonymous', lastName: '' },
+    serviceName: b.service?.name || 'Service',
+    createdAt:   b.review.createdAt || b.updatedAt,
+  }));
+
+  return ApiResponse.success(res, { data: reviews, message: 'Reviews fetched' });
+});
+
 module.exports = {
   applyAsProvider,
   submitKYC,
@@ -414,4 +471,6 @@ module.exports = {
   getProviderStatus,
   switchMode,
   acknowledgeProviderWelcome,
+  getProviderReviews,
+  updateServicesOffered,
 };
