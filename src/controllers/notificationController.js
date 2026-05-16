@@ -308,6 +308,3 @@ module.exports = {
   createTemplate, getTemplates, updateTemplate, deleteTemplate, sendFromTemplate,
   searchUsersForNotif,
 };
-e, sendFromTemplate,
-  searchUsersForNotif,
-};
