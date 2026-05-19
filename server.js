@@ -2,7 +2,7 @@
  * =====================================================
  *  GLAMCOS PLATFORM - Main Server Entry Point
  *  Multi-app backend: User + Provider + Marketplace + Admin
- *  v1.1.0 — Fixed ApiResponse + booking flow
+ *  v1.2.0 — Firebase auth route, Google Sign-In support
  * =====================================================
  */
 
