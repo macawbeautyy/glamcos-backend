@@ -111,25 +111,23 @@ const registerAdminDevice = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { message: 'Device registered for admin push notifications' });
 });
 
-// ── GET /support/conversations ────────────────────────────────────────────────
-// Admin fetches paginated conversation list (fallback for web panel).
-// The mobile admin inbox uses Firestore directly for real-time updates.
+// ── POST /support/notify-user ─────────────────────────────────────────────────
+// Called by the admin panel whenever an ADMIN sends a support reply.
+// Sends a push notification to the user's device via Expo Push API.
 
-const getConversations = asyncHandler(async (req, res) => {
-  const { status = 'all', limit = 30, lastDoc } = req.query;
+const notifyUser = asyncHandler(async (req, res) => {
+  const { userId, message } = req.body;
 
-  let query = db.collection('support_conversations')
-    .orderBy('lastMessageAt', 'desc')
-    .limit(Number(limit));
-
-  if (status !== 'all') {
-    query = query.where('status', '==', status);
+  if (!userId || !message) {
+    return res.status(400).json({ success: false, message: 'userId and message are required' });
   }
 
-  const snap  = await query.get();
-  const convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  try {
+    // 1. Get the user's push token from the Firestore conversation doc
+    const convDoc = await db.collection('support_conversations').doc(userId).get();
+    if (!convDoc.exists) {
+      return ApiResponse.success(res, { notified: 0, message: 'Conversation not found' });
+    }
 
-  return ApiResponse.success(res, { conversations: convs, count: convs.length });
-});
-
-module.exports = { notifyAdmin, registerAdminDevice, getConversations };
+    const userPushToken = convDoc.data()?.userPushToken;
+    if (!user

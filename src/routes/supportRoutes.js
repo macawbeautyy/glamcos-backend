@@ -1,15 +1,16 @@
 const express = require('express');
 const router  = express.Router();
-const { notifyAdmin, registerAdminDevice, getConversations } = require('../controllers/supportController');
+const { notifyAdmin, notifyUser, registerAdminDevice, getConversations } = require('../controllers/supportController');
 const { protect, authorize } = require('../middleware/auth');
 
-// User sends a message → push FCM to admin (auth required so we know it's a real user)
+// User sends a message → push FCM to admin
 router.post('/notify',          protect, notifyAdmin);
+
+// Admin sends a reply → push Expo notification to user's device
+// No auth guard: called from admin panel which uses its own session token
+router.post('/notify-user',     notifyUser);
 
 // Admin registers their device for push notifications
 router.post('/register-device', protect, authorize('admin'), registerAdminDevice);
 
-// Admin fetches all conversations (for web panel / fallback)
-router.get('/conversations',    protect, authorize('admin'), getConversations);
-
-module.exports = router;
+// Admin fet
