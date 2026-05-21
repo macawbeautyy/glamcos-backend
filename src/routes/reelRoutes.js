@@ -7,6 +7,7 @@ const {
   uploadThumbnail,
   createReel,
   deleteReel,
+  getAdminReels,
   getFeed,
   getFollowingFeed,
   incrementView,
@@ -48,6 +49,9 @@ const thumbUpload = multer({
 
 // All reel routes require authentication
 router.use(protect);
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+router.get('/admin/all', getAdminReels);
 
 // ── Video upload (bypasses Firebase Storage CORS) ─────────────────────────────
 router.post('/upload-video',     upload.single('video'),         uploadVideo);

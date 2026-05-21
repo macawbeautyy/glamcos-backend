@@ -163,6 +163,32 @@ exports.deleteReel = asyncHandler(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * GET /api/v1/reels/admin/all?page=1&limit=20&search=
+ * Admin — get ALL reels (active + inactive) with user info for moderation.
+ */
+exports.getAdminReels = asyncHandler(async (req, res) => {
+  const page   = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit  = Math.min(50, parseInt(req.query.limit) || 20);
+  const skip   = (page - 1) * limit;
+  const search = req.query.search?.trim();
+
+  const query = search
+    ? { $or: [{ caption: { $regex: search, $options: 'i' } }, { hashtags: { $regex: search, $options: 'i' } }] }
+    : {};
+
+  const [reels, total] = await Promise.all([
+    Reel.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('user', 'firstName lastName avatar email'),
+    Reel.countDocuments(query),
+  ]);
+
+  res.json({ success: true, data: reels, total, page, pages: Math.ceil(total / limit) });
+});
+
+/**
  * GET /api/v1/reels/feed?page=1&limit=10
  * "For You" feed — recent reels from everyone (simple chronological + trending).
  */
