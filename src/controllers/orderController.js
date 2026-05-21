@@ -153,6 +153,22 @@ const createOrder = asyncHandler(async (req, res) => {
     orderNumber: order.orderNumber,
   }).catch(() => {});
 
+  // Notify each unique seller that they have a new order (non-blocking)
+  const sellerMap = new Map();
+  for (const line of orderItems) {
+    if (!line.seller) continue;
+    const key = line.seller.toString();
+    if (!sellerMap.has(key)) sellerMap.set(key, 0);
+    sellerMap.set(key, sellerMap.get(key) + 1);
+  }
+  for (const [sellerUserId, count] of sellerMap) {
+    Notif.newOrderForSeller(sellerUserId, {
+      orderId:     order._id,
+      orderNumber: order.orderNumber,
+      itemCount:   count,
+    }).catch(() => {});
+  }
+
   return ApiResponse.created(res, {
     data: populated,
     message: 'Order placed successfully',

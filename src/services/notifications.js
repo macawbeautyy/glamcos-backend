@@ -219,6 +219,17 @@ const Notif = {
   newFollower: (creatorId, { followerName, followerId }) =>
     sendToUser(creatorId, { title: `${followerName} is now following you 🎉`, body: `You have a new follower.`, data: { screen: 'CreatorProfile', userId: followerId }, channel: CH.SOCIAL, prefKey: 'social_alerts' }),
 
+  // MARKETPLACE — SELLER
+  newOrderForSeller: (sellerUserId, { orderId, orderNumber, itemCount }) =>
+    sendToUser(sellerUserId, { title: `New Order Received 🛍️`, body: `Order #${orderNumber} — ${itemCount} item${itemCount !== 1 ? 's' : ''} ordered from your shop. Tap to fulfil.`, data: { screen: 'SellerOrders', orderId }, channel: CH.ORDERS, priority: 'high', prefKey: 'order_alerts' }),
+
+  // SALON APPOINTMENTS
+  salonAppointmentBooked: (ownerUserId, { appointmentId, userName, service, date, timeSlot }) =>
+    sendToUser(ownerUserId, { title: `New Salon Booking 💈`, body: `${userName} booked ${service} on ${date} at ${timeSlot}.`, data: { screen: 'SalonDashboard', appointmentId }, channel: CH.BOOKINGS, priority: 'high', prefKey: 'booking_alerts' }),
+
+  salonAppointmentCancelled: (ownerUserId, { userName, service, date, timeSlot }) =>
+    sendToUser(ownerUserId, { title: `Booking Cancelled`, body: `${userName}'s ${service} on ${date} at ${timeSlot} was cancelled.`, data: { screen: 'SalonDashboard' }, channel: CH.BOOKINGS, prefKey: 'booking_alerts' }),
+
   // PROVIDER
   newBookingRequest: (providerId, { bookingId, serviceName, userFirstName, date }) =>
     sendToUser(providerId, { title: `New Booking Request 📅`, body: `${userFirstName} booked ${serviceName} on ${date}. Tap to accept.`, data: { screen: 'ProviderBookings', bookingId }, channel: CH.PROVIDER, priority: 'high', prefKey: 'provider_alerts' }),

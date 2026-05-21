@@ -2,6 +2,7 @@ const SalonPartner     = require('../models/SalonPartner');
 const SalonAppointment = require('../models/SalonAppointment');
 const Razorpay         = require('razorpay');
 const crypto           = require('crypto');
+const { Notif }        = require('../services/notifications');
 
 function getRazorpay() {
   return new Razorpay({
@@ -69,6 +70,14 @@ exports.book = async (req, res) => {
       userId: req.user?._id,
     });
 
+    // Notify salon owner (non-blocking)
+    if (partner.userId) {
+      Notif.salonAppointmentBooked(partner.userId, {
+        appointmentId: appt._id.toString(),
+        userName, service, date, timeSlot,
+      }).catch(() => {});
+    }
+
     res.status(201).json({
       message: 'Appointment booked successfully!',
       appointment: { ...appt.toObject(), salonName: partner.salonName, address: partner.address, city: partner.city },
@@ -114,6 +123,18 @@ exports.cancel = async (req, res) => {
       { new: true }
     );
     if (!appt) return res.status(404).json({ message: 'Appointment not found or cannot be cancelled.' });
+
+    // Notify salon owner of cancellation (non-blocking)
+    const partner = await SalonPartner.findById(appt.partnerId).select('userId').lean();
+    if (partner?.userId) {
+      Notif.salonAppointmentCancelled(partner.userId, {
+        userName:  appt.userName,
+        service:   appt.service,
+        date:      appt.date,
+        timeSlot:  appt.timeSlot,
+      }).catch(() => {});
+    }
+
     res.json({ message: 'Appointment cancelled.', appointment: appt });
   } catch (err) {
     res.status(500).json({ message: 'Server error.' });
@@ -219,6 +240,14 @@ exports.verifyAndBook = async (req, res) => {
       paymentId:   razorpay_payment_id,
       orderId:     razorpay_order_id,
     });
+
+    // Notify salon owner (non-blocking)
+    if (partner.userId) {
+      Notif.salonAppointmentBooked(partner.userId, {
+        appointmentId: appt._id.toString(),
+        userName, service, date, timeSlot,
+      }).catch(() => {});
+    }
 
     res.status(201).json({
       message: 'Appointment booked and payment verified!',

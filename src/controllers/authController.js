@@ -137,7 +137,7 @@ const firebaseLogin = asyncHandler(async (req, res) => {
       firstName,
       lastName,
       email:        email           || `${uid}@firebase.user`,
-      phone:        phone_number    || null,   // null so sparse unique index allows multiple Google users with no phone
+      phone:        phone_number    || undefined,   // undefined = field omitted entirely, sparse index ignores it
       avatar:       picture         || '',
       authProvider: email ? 'google' : 'phone',
       role:         'user',
@@ -645,6 +645,30 @@ const resetPassword = asyncHandler(async (req, res) => {
   });
 });
 
+// ── Delete Account ────────────────────────────────────────────────────────────
+const deleteAccount = asyncHandler(async (req, res) => {
+  const userId = req.user._id || req.user.id;
+  const { reason } = req.body;
+
+  // Soft-delete: anonymise PII and flag the account
+  await User.findByIdAndUpdate(userId, {
+    isDeleted:    true,
+    deletedAt:    new Date(),
+    deleteReason: reason || 'No reason given',
+    email:        `deleted_${userId}@deleted.macaw`,
+    firstName:    'Deleted',
+    lastName:     'User',
+    phone:        null,
+    avatar:       null,
+    fcmToken:     null,
+  });
+
+  return ApiResponse.success(res, {
+    data: null,
+    message: 'Account deleted successfully.',
+  });
+});
+
 module.exports = {
   register,
   login,
@@ -662,4 +686,5 @@ module.exports = {
   updateUserStatus,
   forgotPassword,
   resetPassword,
+  deleteAccount,
 };

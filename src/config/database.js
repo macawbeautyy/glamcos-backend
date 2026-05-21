@@ -18,6 +18,14 @@ const connectDB = async () => {
       `MongoDB Connected: ${conn.connection.host}:${conn.connection.port}/${conn.connection.name}`
     );
 
+    // Fix: drop old non-sparse phone index so sparse:true takes effect
+    try {
+      await conn.connection.collection('users').dropIndex('phone_1');
+      logger.info('Dropped old phone_1 index — will be recreated as sparse');
+    } catch (e) {
+      // Index already dropped or never existed — safe to ignore
+    }
+
     // Connection event listeners
     mongoose.connection.on('error', (err) => {
       logger.error(`MongoDB connection error: ${err.message}`);

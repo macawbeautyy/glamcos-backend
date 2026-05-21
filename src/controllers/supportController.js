@@ -130,4 +130,58 @@ const notifyUser = asyncHandler(async (req, res) => {
     }
 
     const userPushToken = convDoc.data()?.userPushToken;
-    if (!user
+    if (!userPushToken || typeof userPushToken !== 'string') {
+      return ApiResponse.success(res, { notified: 0, message: 'No push token for this user' });
+    }
+
+    // 2. Send push via Expo Push API (works for both Expo & bare workflow)
+    const body = message.length > 100 ? message.slice(0, 97) + '...' : message;
+
+    const expoResp = await fetch('https://exp.host/--/api/v2/push/send', {
+      method:  'POST',
+      headers: {
+        'Accept':       'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to:          userPushToken,
+        title:       '💬 MACAW Support replied',
+        body,
+        data:        { screen: 'SupportChat', type: 'support_reply' },
+        sound:       'default',
+        channelId:   'support',
+        priority:    'high',
+      }),
+    });
+
+    const result = await expoResp.json();
+    return ApiResponse.success(res, { notified: 1, result });
+
+  } catch (err) {
+    console.error('[Support notifyUser Error]', err.message);
+    return ApiResponse.success(res, { notified: 0, error: err.message });
+  }
+});
+
+// ── GET /support/conversations ────────────────────────────────────────────────
+// Admin fetches paginated conversation list (fallback for web panel).
+// The mobile admin inbox uses Firestore directly for real-time updates.
+
+const getConversations = asyncHandler(async (req, res) => {
+  const { status = 'all', limit = 30, lastDoc } = req.query;
+
+  let query = db.collection('support_conversations')
+    .orderBy('lastMessageAt', 'desc')
+    .limit(Number(limit));
+
+  if (status !== 'all') {
+    query = query.where('status', '==', status);
+  }
+
+  const snap  = await query.get();
+  const convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  return ApiResponse.success(res, { conversations: convs, count: convs.length });
+});
+
+module.exports = { notifyAdmin, notifyUser, registerAdminDevice, getConversations };

@@ -13,4 +13,7 @@ router.post('/notify-user',     notifyUser);
 // Admin registers their device for push notifications
 router.post('/register-device', protect, authorize('admin'), registerAdminDevice);
 
-// Admin fet
+// Admin fetches all conversations (for web panel / fallback)
+router.get('/conversations',    protect, authorize('admin'), getConversations);
+
+module.exports = router;

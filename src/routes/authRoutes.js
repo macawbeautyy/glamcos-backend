@@ -19,6 +19,7 @@ const {
   updateUserStatus,
   forgotPassword,
   resetPassword,
+  deleteAccount,
 } = require('../controllers/authController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -72,6 +73,8 @@ router.post('/logout',         protect, logout);
 router.put('/fcm-token',       protect, updateFCMToken);
 router.put('/notif-prefs',     protect, updateNotifPrefs);
 router.put('/location',        protect, updateLocation);
+
+router.delete('/me',           protect, deleteAccount);
 
 // ── Admin Routes ──────────────────────────────────────────────────────────────
 router.get(  '/admin/users',            protect, authorize('admin', 'superadmin'), getAllUsers);
