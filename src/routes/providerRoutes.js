@@ -18,9 +18,22 @@ const {
   acknowledgeProviderWelcome,
   getProviderReviews,
   updateServicesOffered,
+  uploadPortfolioImage,
+  deletePortfolioImage,
 } = require('../controllers/providerController');
 
 const { protect, authorize } = require('../middleware/auth');
+
+// Multer for portfolio image uploads (memory storage, max 5 MB)
+const multer = require('multer');
+const portfolioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'));
+  },
+});
 
 // ── User / Provider routes ────────────────────────────────────────────────────
 router.post('/apply',              protect, applyAsProvider);
@@ -31,6 +44,10 @@ router.put('/availability',        protect, updateAvailability);
 router.put('/services',            protect, updateServicesOffered);
 router.get('/dashboard',           protect, getProviderDashboard);
 router.get('/earnings',            protect, getProviderEarnings);
+
+// ── Portfolio ──────────────────────────────────────────────────────────────────
+router.post('/portfolio',          protect, portfolioUpload.single('image'), uploadPortfolioImage);
+router.delete('/portfolio/:index', protect, deletePortfolioImage);
 
 // ── Dual-Role System routes ───────────────────────────────────────────────────
 router.get('/status',              protect, getProviderStatus);

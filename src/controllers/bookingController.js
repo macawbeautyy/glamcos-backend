@@ -4,6 +4,7 @@ const ApiResponse  = require('../utils/ApiResponse');
 const Booking      = require('../models/Booking');
 const Provider     = require('../models/Provider');
 const { Notif }    = require('../services/notifications');
+const loyalty      = require('../services/loyalty');
 const logger       = require('../utils/logger');
 
 const ok      = (res, data, message = 'Success')  => ApiResponse.success(res, { data, message });
@@ -25,7 +26,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
   ]);
   try {
     await Notif.bookingReceived(req.user._id, { bookingId: booking._id.toString(), serviceName: booking.service?.name || 'your service', date, time });
-  } catch (e) { console.warn('[Booking] User notification failed:', e.message); }
+  } catch (e) { logger.warn('[Booking] User notification failed:', e.message); }
   try {
     const providers = await Provider.find({ isOnline: true, isAvailable: true, status: 'active' }).select('user').lean();
     if (providers.length > 0) {
@@ -33,7 +34,12 @@ exports.createBooking = asyncHandler(async (req, res) => {
       await Promise.allSettled(providers.map(p => Notif.newBookingRequest(p.user, payload).catch(() => {})));
       logger.info('[Booking] Notified ' + providers.length + ' providers of new booking ' + booking._id);
     }
-  } catch (e) { console.warn('[Booking] Provider notification failed:', e.message); }
+  } catch (e) { logger.warn('[Booking] Provider notification failed:', e.message); }
+  // Award first-booking bonus if this is the user's very first booking
+  const prevCount = await Booking.countDocuments({ user: req.user._id, _id: { $ne: booking._id } });
+  if (prevCount === 0) {
+    loyalty.earnBonus(req.user._id, 'first_booking', booking._id).catch((e) => logger.warn('[Loyalty] first_booking bonus failed:', e.message));
+  }
   return created(res, booking, 'Booking confirmed');
 });
 
@@ -90,6 +96,11 @@ exports.updateProviderBookingStatus = asyncHandler(async (req, res) => {
   if (!booking) throw new ApiError(404, 'Booking not found or not assigned to you');
   if (status === 'completed') {
     Notif.serviceCompleted(booking.user._id, { bookingId: booking._id, serviceName: booking.service?.name || 'your service' }).catch(() => {});
+    // Award loyalty points — fire-and-forget so booking response isn't delayed
+    if (booking.amount > 0) {
+      loyalty.earnFromBooking(booking.user._id, booking._id, booking.amount, 'basic')
+        .catch((err) => logger.warn('[Loyalty] earn failed:', err.message));
+    }
   } else if (status === 'in-progress') {
     Notif.providerOnTheWay(booking.user._id, { bookingId: booking._id, providerName: provider.displayName || 'Your provider', eta: '30 minutes' }).catch(() => {});
   }
@@ -180,5 +191,7 @@ exports.submitReview = asyncHandler(async (req, res) => {
   if (booking.review && booking.review.rating) throw new ApiError(409, 'You have already submitted a review for this booking');
   booking.review = { rating: Number(rating), comment: (comment || '').trim().slice(0, 500), createdAt: new Date() };
   await booking.save();
+  // Award loyalty bonus for writing a review (fire-and-forget)
+  loyalty.earnBonus(req.user._id, 'write_review', booking._id).catch((e) => logger.warn('[Loyalty] review bonus failed:', e.message));
   return ok(res, booking.review, 'Review submitted successfully');
 });

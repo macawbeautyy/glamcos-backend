@@ -456,6 +456,79 @@ const getProviderReviews = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: reviews, message: 'Reviews fetched' });
 });
 
+// ── Portfolio: Upload ─────────────────────────────────────────────────────────
+const uploadPortfolioImage = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest('No image file provided');
+
+  const axios    = require('axios');
+  const FormData = require('form-data');
+  const path     = require('path');
+
+  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
+  const apiKey       = process.env.CLOUDINARY_API_KEY;
+  const apiSecret    = process.env.CLOUDINARY_API_SECRET;
+
+  if (!cloudName) throw ApiError.serviceUnavailable('Image storage not configured');
+
+  const userId = req.user.id;
+  const ext    = path.extname(req.file.originalname) || '.jpg';
+  const folder = `portfolio/${userId}`;
+  const form   = new FormData();
+  form.append('file', req.file.buffer, { filename: `portfolio_${Date.now()}${ext}`, contentType: req.file.mimetype || 'image/jpeg' });
+  form.append('resource_type', 'image');
+  form.append('folder', folder);
+
+  let imageUrl;
+  if (uploadPreset) {
+    form.append('upload_preset', uploadPreset);
+    const r = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, form, {
+      headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000,
+    });
+    imageUrl = r.data.secure_url;
+  } else if (apiKey && apiSecret) {
+    const crypto    = require('crypto');
+    const timestamp = Math.floor(Date.now() / 1000);
+    const toSign    = `folder=${folder}&resource_type=image&timestamp=${timestamp}${apiSecret}`;
+    const signature = crypto.createHash('sha1').update(toSign).digest('hex');
+    form.append('api_key', apiKey);
+    form.append('timestamp', String(timestamp));
+    form.append('signature', signature);
+    const r = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, form, {
+      headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000,
+    });
+    imageUrl = r.data.secure_url;
+  } else {
+    throw ApiError.serviceUnavailable('Cloudinary credentials not configured');
+  }
+
+  // Append to provider's portfolio (max 10 items)
+  const provider = await Provider.findOne({ user: userId });
+  if (!provider) throw ApiError.notFound('Provider profile not found');
+  if ((provider.portfolio || []).length >= 10) throw ApiError.badRequest('Portfolio limit reached (max 10 photos)');
+
+  provider.portfolio.push({ url: imageUrl, caption: req.body.caption || '', uploadedAt: new Date() });
+  await provider.save();
+
+  return ApiResponse.success(res, {
+    data: { imageUrl, portfolio: provider.portfolio },
+    message: 'Portfolio photo uploaded successfully',
+  });
+});
+
+// ── Portfolio: Delete by index ────────────────────────────────────────────────
+const deletePortfolioImage = asyncHandler(async (req, res) => {
+  const index = parseInt(req.params.index, 10);
+  const provider = await Provider.findOne({ user: req.user.id });
+  if (!provider) throw ApiError.notFound('Provider profile not found');
+  if (isNaN(index) || index < 0 || index >= (provider.portfolio || []).length) {
+    throw ApiError.badRequest('Invalid portfolio index');
+  }
+  provider.portfolio.splice(index, 1);
+  await provider.save();
+  return ApiResponse.success(res, { data: { portfolio: provider.portfolio }, message: 'Photo removed' });
+});
+
 module.exports = {
   applyAsProvider,
   submitKYC,
@@ -473,4 +546,6 @@ module.exports = {
   acknowledgeProviderWelcome,
   getProviderReviews,
   updateServicesOffered,
+  uploadPortfolioImage,
+  deletePortfolioImage,
 };

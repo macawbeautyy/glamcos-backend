@@ -51,7 +51,7 @@ exports.sendEmail = async ({ to, subject, text, html }) => {
   }
 
   try {
-    const from = process.env.SMTP_FROM || `"MACAW Beauty" <${process.env.SMTP_USER}>`;
+    const from = process.env.SMTP_FROM || `"GLAMCOS" <${process.env.SMTP_USER}>`;
     await transporter.sendMail({ from, to, subject, text, html });
     console.log(`[Mailer] Email sent to ${to}: ${subject}`);
     return { success: true };

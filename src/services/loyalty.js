@@ -158,10 +158,12 @@ async function getLoyaltySummary(userId) {
   const totalRedeemed = Math.abs(transactions.filter(t => t.points < 0).reduce((s, t) => s + t.points, 0));
   const cashValue    = parseFloat((user.loyaltyPoints * POINT_VALUE).toFixed(2));
 
-  // Tier thresholds
+  // Tier thresholds — must match frontend LoyaltyScreen.js TIERS array
+  // Bronze: 0–499 | Silver: 500–1499 | Gold: 1500–3999 | Platinum: 4000+
   let tier = 'Bronze';
-  if (totalEarned >= 5000) tier = 'Gold';
-  else if (totalEarned >= 2000) tier = 'Silver';
+  if      (totalEarned >= 4000) tier = 'Platinum';
+  else if (totalEarned >= 1500) tier = 'Gold';
+  else if (totalEarned >=  500) tier = 'Silver';
 
   return {
     balance:       user.loyaltyPoints,

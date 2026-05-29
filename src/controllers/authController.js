@@ -650,18 +650,27 @@ const deleteAccount = asyncHandler(async (req, res) => {
   const userId = req.user._id || req.user.id;
   const { reason } = req.body;
 
-  // Soft-delete: anonymise PII and flag the account
-  await User.findByIdAndUpdate(userId, {
-    isDeleted:    true,
-    deletedAt:    new Date(),
-    deleteReason: reason || 'No reason given',
-    email:        `deleted_${userId}@deleted.macaw`,
-    firstName:    'Deleted',
-    lastName:     'User',
-    phone:        null,
-    avatar:       null,
-    fcmToken:     null,
-  });
+  // Soft-delete: anonymise PII, flag the account, and invalidate all tokens
+  await User.findByIdAndUpdate(
+    userId,
+    {
+      isDeleted:    true,
+      deletedAt:    new Date(),
+      deleteReason: reason || 'No reason given',
+      status:       'inactive',
+      email:        `deleted_${userId}@deleted.macaw`,
+      firstName:    'Deleted',
+      lastName:     'User',
+      phone:        null,
+      avatar:       null,
+      fcmTokens:    [],        // clear push tokens
+      refreshToken: null,      // invalidate refresh token
+      bio:          null,
+      socialLink:   null,
+      username:     null,
+    },
+    { strict: false }          // allow fields not yet in schema (safety net)
+  );
 
   return ApiResponse.success(res, {
     data: null,

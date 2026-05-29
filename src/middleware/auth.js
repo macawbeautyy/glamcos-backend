@@ -41,6 +41,11 @@ const protect = asyncHandler(async (req, _res, next) => {
       throw ApiError.unauthorized('User associated with this token no longer exists.');
     }
 
+    // Check if account has been deleted
+    if (user.isDeleted) {
+      throw ApiError.unauthorized('This account has been deleted.');
+    }
+
     // Check if user is active
     if (user.status === 'suspended' || user.status === 'banned') {
       throw ApiError.forbidden('Your account has been suspended. Contact support.');
