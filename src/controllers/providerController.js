@@ -529,12 +529,30 @@ const deletePortfolioImage = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: { portfolio: provider.portfolio }, message: 'Photo removed' });
 });
 
+// ── Update provider GPS location ──────────────────────────────────────────────
+// Called by provider app every ~30s while online so nearest-provider queries work
+const updateProviderLocation = asyncHandler(async (req, res) => {
+  const { lat, lng } = req.body;
+  if (!lat || !lng) throw ApiError.badRequest('lat and lng are required');
+  const provider = await Provider.findOneAndUpdate(
+    { user: req.user._id },
+    {
+      location: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+      locationUpdatedAt: new Date(),
+    },
+    { new: true }
+  );
+  if (!provider) throw ApiError.notFound('Provider profile not found');
+  return ApiResponse.success(res, { data: { location: provider.location }, message: 'Location updated' });
+});
+
 module.exports = {
   applyAsProvider,
   submitKYC,
   submitBankDetails,
   getMyProviderProfile,
   updateAvailability,
+  updateProviderLocation,
   getProviderDashboard,
   getProviderEarnings,
   getPendingProviders,

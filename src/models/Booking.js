@@ -32,6 +32,11 @@ const BookingSchema = new mongoose.Schema({
   razorpayPaymentId: { type: String },
   razorpaySignature: { type: String },
   cancelReason: { type: String },
+  // Customer GPS at time of booking — used for nearest-provider matching
+  userLocation: {
+    type:        { type: String, enum: ['Point'] },
+    coordinates: [Number], // [longitude, latitude]
+  },
   // User rating after service completion
   review: {
     rating:    { type: Number, min: 1, max: 5 },

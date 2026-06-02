@@ -57,6 +57,14 @@ const providerSchema = new mongoose.Schema(
     approvedBy:      { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     approvedAt:      { type: Date },
 
+    // ── Location (GeoJSON — updated when provider goes online) ────────────
+    location: {
+      type:        { type: String, enum: ['Point'], default: 'Point' },
+      coordinates: { type: [Number], default: [0, 0] }, // [longitude, latitude]
+    },
+    locationUpdatedAt: { type: Date },
+    serviceRadius: { type: Number, default: 10 }, // km — max distance to accept orders
+
     // ── Real-time Availability ─────────────────────────────────────────────
     isAvailable: { type: Boolean, default: false },
     isOnline:    { type: Boolean, default: false },
@@ -83,5 +91,6 @@ const providerSchema = new mongoose.Schema(
 
 providerSchema.index({ status: 1, createdAt: -1 });
 providerSchema.index({ city: 1, isAvailable: 1 });
+providerSchema.index({ location: '2dsphere' }); // geospatial — nearest provider queries
 
 module.exports = mongoose.model('Provider', providerSchema);

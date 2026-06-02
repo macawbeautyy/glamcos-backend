@@ -7,6 +7,7 @@ const {
   submitBankDetails,
   getMyProviderProfile,
   updateAvailability,
+  updateProviderLocation,
   getProviderDashboard,
   getProviderEarnings,
   getPendingProviders,
@@ -41,6 +42,7 @@ router.post('/kyc',                protect, submitKYC);
 router.post('/bank',               protect, submitBankDetails);
 router.get('/me',                  protect, getMyProviderProfile);
 router.put('/availability',        protect, updateAvailability);
+router.put('/location',            protect, updateProviderLocation); // GPS ping every 30s
 router.put('/services',            protect, updateServicesOffered);
 router.get('/dashboard',           protect, getProviderDashboard);
 router.get('/earnings',            protect, getProviderEarnings);

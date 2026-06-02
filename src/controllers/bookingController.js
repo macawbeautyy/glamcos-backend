@@ -11,7 +11,11 @@ const ok      = (res, data, message = 'Success')  => ApiResponse.success(res, { 
 const created = (res, data, message = 'Created')  => ApiResponse.created(res, { data, message });
 
 exports.createBooking = asyncHandler(async (req, res) => {
-  const { service, stylist, date, time, amount, address, notes, serviceMode, homeAddress, paymentMode } = req.body;
+  const {
+    service, stylist, date, time, amount, address, notes,
+    serviceMode, homeAddress, paymentMode,
+    userLat, userLng,  // customer GPS from mobile app
+  } = req.body;
   if (!service || !date || !time || !amount) throw new ApiError(400, 'service, date, time and amount are required');
 
   const booking = await Booking.create({
@@ -19,23 +23,53 @@ exports.createBooking = asyncHandler(async (req, res) => {
     address: homeAddress || address, notes,
     serviceMode: serviceMode || 'salon',
     paymentMode: paymentMode || 'pay_at_salon',
+    userLocation: (userLat && userLng)
+      ? { type: 'Point', coordinates: [parseFloat(userLng), parseFloat(userLat)] }
+      : undefined,
   });
   await booking.populate([
     { path: 'service', select: 'name price image images duration category' },
     { path: 'stylist', select: 'name profileImage' },
   ]);
+
   try {
     await Notif.bookingReceived(req.user._id, { bookingId: booking._id.toString(), serviceName: booking.service?.name || 'your service', date, time });
   } catch (e) { logger.warn('[Booking] User notification failed:', e.message); }
+
+  // ── Nearest-provider matching ───────────────────────────────────────────
   try {
-    const providers = await Provider.find({ isOnline: true, isAvailable: true, status: 'active' }).select('user').lean();
-    if (providers.length > 0) {
-      const payload = { bookingId: booking._id.toString(), serviceName: booking.service?.name || 'a service', userFirstName: req.user.firstName || 'Customer', date, time };
+    let providers;
+    if (userLat && userLng) {
+      const lat = parseFloat(userLat), lng = parseFloat(userLng);
+      // Try 5 km first, expand to 20 km if nobody nearby
+      for (const radiusKm of [5, 20]) {
+        providers = await Provider.find({
+          isOnline: true, isAvailable: true, status: 'active',
+          location: { $near: { $geometry: { type: 'Point', coordinates: [lng, lat] }, $maxDistance: radiusKm * 1000 } },
+        }).select('user displayName').lean();
+        if (providers.length > 0) {
+          logger.info(`[Booking] ${providers.length} providers within ${radiusKm}km for booking ${booking._id}`);
+          break;
+        }
+      }
+    } else {
+      providers = await Provider.find({ isOnline: true, isAvailable: true, status: 'active' }).select('user').lean();
+      logger.info(`[Booking] No GPS — notifying all ${providers.length} online providers`);
+    }
+
+    if (providers && providers.length > 0) {
+      const payload = {
+        bookingId: booking._id.toString(),
+        serviceName: booking.service?.name || 'a service',
+        userFirstName: req.user.firstName || 'Customer',
+        date, time,
+        userLat: userLat || null,
+        userLng: userLng || null,
+      };
       await Promise.allSettled(providers.map(p => Notif.newBookingRequest(p.user, payload).catch(() => {})));
-      logger.info('[Booking] Notified ' + providers.length + ' providers of new booking ' + booking._id);
     }
   } catch (e) { logger.warn('[Booking] Provider notification failed:', e.message); }
-  // Award first-booking bonus if this is the user's very first booking
+
   const prevCount = await Booking.countDocuments({ user: req.user._id, _id: { $ne: booking._id } });
   if (prevCount === 0) {
     loyalty.earnBonus(req.user._id, 'first_booking', booking._id).catch((e) => logger.warn('[Loyalty] first_booking bonus failed:', e.message));
