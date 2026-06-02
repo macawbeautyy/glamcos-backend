@@ -159,8 +159,16 @@ const updateAvailability = asyncHandler(async (req, res) => {
 // ── Provider: Dashboard summary ───────────────────────────────────────────────
 
 const getProviderDashboard = asyncHandler(async (req, res) => {
-  const provider = await Provider.findOne({ user: req.user.id });
-  if (!provider) throw ApiError.notFound('Provider profile not found');
+  // Auto-create a provider profile if one doesn't exist yet
+  // (handles the case where a user with role=provider has no Provider doc)
+  let provider = await Provider.findOne({ user: req.user.id });
+  if (!provider) {
+    provider = await Provider.create({
+      user:   req.user.id,
+      status: 'pending',
+      displayName: req.user.firstName || req.user.email?.split('@')[0] || 'Provider',
+    });
+  }
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
