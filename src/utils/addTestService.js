@@ -16,9 +16,10 @@ async function run() {
   console.log('MongoDB connected');
 
   // Find any category to attach to
-  let category = await Category.findOne({ isActive: true }).lean();
+  const category = await Category.findOne({ isActive: true }).lean();
   if (!category) {
-    category = await Category.create({ name: 'Test', slug: 'test', icon: '🧪', isActive: true, createdBy: null });
+    console.error('No active categories found. Please seed the database first.');
+    process.exit(1);
   }
 
   // Find admin user as provider
