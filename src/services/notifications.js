@@ -274,4 +274,7 @@ module.exports = {
   sendToAdmins,
   sendToCity,
   sendToInactiveUsers,
-  cleanupStaleTo
+  cleanupStaleTokens,
+  Notif,
+  CH,
+};
