@@ -46,6 +46,8 @@ app.set('trust proxy', 1);
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // Allow popups needed for Firebase Google Sign-In (signInWithPopup)
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
     contentSecurityPolicy: config.env === 'production' ? undefined : false,
   })
 );
