@@ -232,7 +232,7 @@ const Notif = {
 
   // PROVIDER
   newBookingRequest: (providerId, { bookingId, serviceName, userFirstName, date }) =>
-    sendToUser(providerId, { title: `New Booking Request 📅`, body: `${userFirstName} booked ${serviceName} on ${date}. Tap to accept.`, data: { screen: 'ProviderBookings', bookingId }, channel: CH.PROVIDER, priority: 'high', prefKey: 'provider_alerts' }),
+    sendToUser(providerId, { title: `New Booking Request 📅`, body: `${userFirstName} booked ${serviceName} on ${date}. Tap to accept.`, data: { screen: 'ProviderBookings', bookingId }, channel: CH.PROVIDER, priority: 'high', sound: 'new_order.wav', prefKey: 'provider_alerts' }),
 
   providerApproved: (userId, { userName } = {}) =>
     sendToUser(userId, { title: `Welcome to GlamCos! 🎊`, body: `Hi ${userName || 'there'}! Your provider account is approved. Start accepting bookings now.`, data: { screen: 'ProviderDashboard' }, channel: CH.PROVIDER }),
@@ -274,7 +274,4 @@ module.exports = {
   sendToAdmins,
   sendToCity,
   sendToInactiveUsers,
-  cleanupStaleTokens,
-  Notif,
-  CH,
-};
+  cleanupStaleTo
