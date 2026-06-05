@@ -29,6 +29,9 @@ const config = {
     'https://glamcos-user.vercel.app',
     'https://glamcos-provider.vercel.app',
     'https://glamcos-admin.vercel.app',
+    // Partner app deployed to Vercel
+    'https://provider-app-mobile.vercel.app',
+    'https://provider-app-mobile-e1r24bxr9-macawbeautyy-1562s-projects.vercel.app',
     // From env vars (override or extend above)
     process.env.CORS_ORIGIN_USER_APP,
     process.env.CORS_ORIGIN_PROVIDER_APP,
