@@ -9,13 +9,15 @@ const BookingSchema = new mongoose.Schema({
   date:    { type: String, required: true },
   time:    { type: String, required: true },
   amount:  { type: Number, required: true },
-  address: { type: String },
-  notes:   { type: String },
+  address:     { type: String },
+  homeAddress: { type: String }, // Full text address for home-visit bookings
+  notes:       { type: String },
   // Service mode: 'salon' (user visits) | 'home' (provider visits)
   serviceMode: { type: String, enum: ['salon', 'home'], default: 'salon' },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'in-progress', 'completed', 'cancelled'],
+    // reached = provider arrived at user location (verified by GPS proximity)
+    enum: ['pending', 'confirmed', 'in-progress', 'reached', 'completed', 'cancelled'],
     default: 'pending',
   },
   paymentStatus: {

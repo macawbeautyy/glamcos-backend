@@ -20,7 +20,9 @@ exports.createBooking = asyncHandler(async (req, res) => {
 
   const booking = await Booking.create({
     user: req.user._id, service, stylist: stylist || null, date, time, amount,
-    address: homeAddress || address, notes,
+    address: homeAddress || address,
+    homeAddress: homeAddress || undefined,
+    notes,
     serviceMode: serviceMode || 'salon',
     paymentMode: paymentMode || 'pay_at_salon',
     userLocation: (userLat && userLng)
@@ -97,9 +99,10 @@ exports.getProviderBookings = asyncHandler(async (req, res) => {
     ? { provider: provider._id, status }
     : { $or: [{ provider: provider._id }, { provider: null, status: 'pending' }] };
   const bookings = await Booking.find(filter)
-    .populate('user', 'firstName lastName phone')
+    .populate('user', 'firstName lastName phone avatar')
     .populate('service', 'name price image duration category')
     .populate('provider', 'displayName avatar')
+    .select('+homeAddress +userLocation +address +serviceMode +notes')
     .sort({ createdAt: -1 }).limit(50);
   return ok(res, bookings, 'Provider bookings fetched');
 });
@@ -107,10 +110,20 @@ exports.getProviderBookings = asyncHandler(async (req, res) => {
 exports.acceptBooking = asyncHandler(async (req, res) => {
   const provider = await Provider.findOne({ user: req.user._id, status: 'active' });
   if (!provider) throw new ApiError(403, 'Only active providers can accept bookings');
+
+  // ── One-active-order rule ─────────────────────────────────────────────────
+  const activeStatuses = ['confirmed', 'in-progress', 'reached'];
+  const alreadyActive = await Booking.findOne({ provider: provider._id, status: { $in: activeStatuses } });
+  if (alreadyActive) {
+    throw new ApiError(409, 'You already have an active booking. Complete it before accepting a new one.');
+  }
+
   const booking = await Booking.findOneAndUpdate(
     { _id: req.params.id, status: 'pending', $or: [{ provider: null }, { provider: provider._id }] },
     { provider: provider._id, status: 'confirmed' }, { new: true }
-  ).populate('user', 'firstName lastName phone').populate('service', 'name');
+  ).populate('user', 'firstName lastName phone')
+   .populate('service', 'name price duration image')
+   .populate('provider', 'displayName avatar');
   if (!booking) throw new ApiError(404, 'Booking not found, already assigned, or not pending');
   try {
     await Notif.bookingConfirmed(booking.user._id, { bookingId: booking._id.toString(), serviceName: booking.service?.name || 'your service', date: booking.date });
@@ -118,25 +131,68 @@ exports.acceptBooking = asyncHandler(async (req, res) => {
   return ok(res, booking, 'Booking accepted');
 });
 
+// ── Haversine distance in metres ──────────────────────────────────────────────
+function distanceMetres(lat1, lng1, lat2, lng2) {
+  const R    = 6_371_000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const REACHED_RADIUS_M = 50; // metres — provider must be within 50 m of user
+
 exports.updateProviderBookingStatus = asyncHandler(async (req, res) => {
-  const { status } = req.body;
-  const allowed = ['in-progress', 'completed'];
+  const { status, providerLat, providerLng } = req.body;
+  const allowed = ['in-progress', 'reached', 'completed'];
   if (!allowed.includes(status)) throw new ApiError(400, 'Status must be one of: ' + allowed.join(', '));
+
   const provider = await Provider.findOne({ user: req.user._id, status: 'active' });
   if (!provider) throw new ApiError(403, 'Only active providers can update booking status');
+
+  // ── Proximity gate for 'reached' ──────────────────────────────────────────
+  if (status === 'reached') {
+    const booking = await Booking.findOne({ _id: req.params.id, provider: provider._id });
+    if (!booking) throw new ApiError(404, 'Booking not found or not assigned to you');
+
+    const userCoords = booking.userLocation?.coordinates;
+    if (userCoords?.length === 2 && providerLat && providerLng) {
+      const [userLng, userLat] = userCoords; // GeoJSON: [lng, lat]
+      const dist = distanceMetres(
+        parseFloat(providerLat), parseFloat(providerLng),
+        userLat, userLng
+      );
+      if (dist > REACHED_RADIUS_M) {
+        throw new ApiError(400, `You are ${Math.round(dist)} m away. You must be within ${REACHED_RADIUS_M} m of the customer to mark as Reached.`);
+      }
+    }
+    // No user GPS stored → allow without proximity check
+  }
+
   const booking = await Booking.findOneAndUpdate(
     { _id: req.params.id, provider: provider._id }, { status }, { new: true }
   ).populate('user', 'firstName lastName phone').populate('service', 'name price');
   if (!booking) throw new ApiError(404, 'Booking not found or not assigned to you');
+
   if (status === 'completed') {
     Notif.serviceCompleted(booking.user._id, { bookingId: booking._id, serviceName: booking.service?.name || 'your service' }).catch(() => {});
-    // Award loyalty points — fire-and-forget so booking response isn't delayed
     if (booking.amount > 0) {
       loyalty.earnFromBooking(booking.user._id, booking._id, booking.amount, 'basic')
         .catch((err) => logger.warn('[Loyalty] earn failed:', err.message));
     }
   } else if (status === 'in-progress') {
     Notif.providerOnTheWay(booking.user._id, { bookingId: booking._id, providerName: provider.displayName || 'Your provider', eta: '30 minutes' }).catch(() => {});
+  } else if (status === 'reached') {
+    // Notify user that provider has arrived
+    Notif.sendToUser(booking.user._id, {
+      title: '🎉 Provider Arrived!',
+      body:  `${provider.displayName || 'Your provider'} has arrived at your location.`,
+      data:  { bookingId: booking._id.toString() },
+    }).catch(() => {});
   }
   return ok(res, booking, 'Booking marked as ' + status);
 });
