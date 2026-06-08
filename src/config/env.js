@@ -24,39 +24,39 @@ const config = {
 
   // CORS - whitelist all platform apps
   cors: {
-  origins: [
-    // Production — hardcoded so Render env vars being unset never breaks CORS
-    'https://glamcos-user.vercel.app',
-    'https://glamcos-user-gamma.vercel.app',
-    'https://glamcos-provider.vercel.app',
-    'https://glamcos-admin.vercel.app',
-    'https://glamcos-admin-gamma.vercel.app',
-    'https://www.macawbeautyy.com',
-    // Partner app deployed to Vercel
-    'https://provider-app-mobile.vercel.app',
-    'https://provider-app-mobile-e1r24bxr9-macawbeautyy-1562s-projects.vercel.app',
-    // From env vars (override or extend above)
-    process.env.CORS_ORIGIN_USER_APP,
-    process.env.CORS_ORIGIN_PROVIDER_APP,
-    process.env.CORS_ORIGIN_MARKETPLACE_APP,
-    process.env.CORS_ORIGIN_ADMIN_PANEL,
-    // Local dev
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:8081',
-    'http://localhost:8082',
-    'http://localhost:5000',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:3001',
-    'http://127.0.0.1:8081',
-    'http://127.0.0.1:8082',
-    'http://192.168.0.102:3000',
-    'http://192.168.0.102:5173',
-    'http://192.168.0.102:8082',
-  ].filter(Boolean),
-},
+    origins: [
+      // Production — hardcoded so Render env vars being unset never breaks CORS
+      'https://glamcos-user.vercel.app',
+      'https://glamcos-user-gamma.vercel.app',
+      'https://glamcos-provider.vercel.app',
+      'https://glamcos-admin.vercel.app',
+      'https://glamcos-admin-gamma.vercel.app',
+      'https://www.macawbeautyy.com',
+      // Partner app deployed to Vercel
+      'https://provider-app-mobile.vercel.app',
+      'https://provider-app-mobile-e1r24bxr9-macawbeautyy-1562s-projects.vercel.app',
+      // From env vars (override or extend above)
+      process.env.CORS_ORIGIN_USER_APP,
+      process.env.CORS_ORIGIN_PROVIDER_APP,
+      process.env.CORS_ORIGIN_MARKETPLACE_APP,
+      process.env.CORS_ORIGIN_ADMIN_PANEL,
+      // Local dev
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:8081',
+      'http://localhost:8082',
+      'http://localhost:5000',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+      'http://127.0.0.1:8081',
+      'http://127.0.0.1:8082',
+      'http://192.168.0.102:3000',
+      'http://192.168.0.102:5173',
+      'http://192.168.0.102:8082',
+    ].filter(Boolean),
+  },
 
   // Rate Limiting
   rateLimit: {
@@ -98,4 +98,12 @@ const validateConfig = () => {
   }
 
   if (missing.length > 0 && config.env === 'production') {
-    throw new Err
+    throw new Error(
+      `FATAL: Missing required env vars: ${missing.join(', ')}`
+    );
+  }
+};
+
+validateConfig();
+
+module.exports = config;
