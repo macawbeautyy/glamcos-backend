@@ -27,8 +27,11 @@ const config = {
   origins: [
     // Production — hardcoded so Render env vars being unset never breaks CORS
     'https://glamcos-user.vercel.app',
+    'https://glamcos-user-gamma.vercel.app',
     'https://glamcos-provider.vercel.app',
     'https://glamcos-admin.vercel.app',
+    'https://glamcos-admin-gamma.vercel.app',
+    'https://www.macawbeautyy.com',
     // Partner app deployed to Vercel
     'https://provider-app-mobile.vercel.app',
     'https://provider-app-mobile-e1r24bxr9-macawbeautyy-1562s-projects.vercel.app',
@@ -95,12 +98,4 @@ const validateConfig = () => {
   }
 
   if (missing.length > 0 && config.env === 'production') {
-    throw new Error(
-      `FATAL: Missing required env vars: ${missing.join(', ')}`
-    );
-  }
-};
-
-validateConfig();
-
-module.exports = config;
+    throw new Err
