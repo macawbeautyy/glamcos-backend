@@ -183,8 +183,114 @@ const ProductSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // ---- Cosmetics / Beauty Extended Fields ----
+    ingredients: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    activeIngredients: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    benefits: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    howToUse: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    hairType: {
+      type: [String],  // e.g. ['dry', 'oily', 'normal', 'curly']
+      default: [],
+    },
+    fragrance: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    // ---- Compliance / Regulatory ----
+    hsnCode: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    manufacturingDate: {
+      type: Date,
+      default: null,
+    },
+    expiryDate: {
+      type: Date,
+      default: null,
+    },
+    safetyInstructions: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    safetyClaims: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    countryOfOrigin: {
+      type: String,
+      trim: true,
+      default: 'India',
+    },
+    manufacturerName: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    manufacturerAddress: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    sellerInfo: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    // ---- Inventory Extended ----
+    stockQuantity: {
+      type: Number,
+      default: null,  // mirrors stock, for legacy compat
+    },
+    lowStockAlert: {
+      type: Number,
+      default: 5,   // mirrors lowStockThreshold
+    },
+    volume: {
+      value: { type: Number, default: null },
+      unit:  { type: String, enum: ['ml', 'l', 'fl oz'], default: 'ml' },
+    },
+
+    // ---- Product Status (extended) ----
+    productStatus: {
+      type: String,
+      enum: ['draft', 'submitted', 'under_review', 'approved', 'rejected', 'archived'],
+      default: 'draft',
+      index: true,
+    },
+
     // ---- Admin ----
     rejectionReason: {
+      type: String,
+      default: null,
+    },
+    adminNotes: {
+      type: String,
+      default: null,
+    },
+    requestedChanges: {
       type: String,
       default: null,
     },
@@ -237,6 +343,23 @@ ProductSchema.pre('save', function (next) {
   if (this.isModified('name')) {
     const suffix = this._id.toString().slice(-4);
     this.slug = slugify(`${this.name}-${suffix}`, { lower: true, strict: true });
+  }
+
+  // Sync stock <-> stockQuantity
+  if (this.isModified('stock') && this.stockQuantity === null) this.stockQuantity = this.stock;
+  if (this.isModified('stockQuantity') && this.stockQuantity !== null) this.stock = this.stockQuantity;
+
+  // Sync lowStockThreshold <-> lowStockAlert
+  if (this.isModified('lowStockAlert')) this.lowStockThreshold = this.lowStockAlert;
+  if (this.isModified('lowStockThreshold')) this.lowStockAlert = this.lowStockThreshold;
+
+  // Sync productStatus <-> status
+  const STATUS_MAP = { draft: 'draft', submitted: 'pending_approval', under_review: 'pending_approval', approved: 'active', rejected: 'rejected', archived: 'archived' };
+  if (this.isModified('productStatus')) {
+    this.status = STATUS_MAP[this.productStatus] || this.productStatus;
+  } else if (this.isModified('status') && !this.isModified('productStatus')) {
+    const REV = { draft: 'draft', pending_approval: 'submitted', active: 'approved', rejected: 'rejected', archived: 'archived', inactive: 'draft', out_of_stock: 'approved' };
+    this.productStatus = REV[this.status] || this.productStatus;
   }
 
   // Auto-set out_of_stock status

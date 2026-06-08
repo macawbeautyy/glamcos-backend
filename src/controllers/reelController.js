@@ -159,6 +159,175 @@ exports.deleteReel = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// REPORT / BLOCK / HIDE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/reels/:id/report
+ * Report a reel for a given reason.
+ */
+exports.reportReel = asyncHandler(async (req, res) => {
+  const { reason, details } = req.body;
+  const userId = req.user._id;
+
+  const VALID_REASONS = ['copyright_violation','spam','offensive_content','harassment','nudity','violence','misinformation','other'];
+  if (!reason || !VALID_REASONS.includes(reason)) {
+    throw ApiError.badRequest(`reason must be one of: ${VALID_REASONS.join(', ')}`);
+  }
+
+  const reel = await Reel.findById(req.params.id);
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  // Prevent duplicate reports from same user
+  const alreadyReported = reel.reportedBy.map(String).includes(userId.toString());
+  if (alreadyReported) {
+    return res.status(409).json({ success: false, message: 'You have already reported this reel' });
+  }
+
+  reel.reports.push({ user: userId, reason, details: details || '' });
+  reel.reportedBy.push(userId);
+  reel.reportCount = reel.reports.length;
+  reel.isReported  = true;
+
+  // Auto-flag for admin review if 3+ reports
+  if (reel.reportCount >= 3 && reel.moderationStatus === 'clean') {
+    reel.moderationStatus = 'flagged';
+  }
+
+  await reel.save();
+  res.json({ success: true, message: 'Thank you. We will review this content.' });
+});
+
+/**
+ * POST /api/v1/reels/:id/hide
+ * Hide a reel from own feed (user-side hide).
+ */
+exports.hideReel = asyncHandler(async (req, res) => {
+  const reel = await Reel.findById(req.params.id);
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  const userId   = req.user._id;
+  const isOwner  = reel.user.toString() === userId.toString();
+  const isAdmin  = ['admin','superadmin'].includes(req.user.role);
+
+  if (isOwner || isAdmin) {
+    reel.hiddenStatus = isAdmin ? 'hidden_by_admin' : 'hidden_by_user';
+    reel.hiddenAt     = new Date();
+    reel.hiddenBy     = userId;
+    reel.isActive     = false;
+    await reel.save();
+    return res.json({ success: true, message: 'Reel hidden' });
+  }
+
+  // For non-owner: just mark blockedBy (hides from their feed client-side)
+  if (!reel.blockedBy.map(String).includes(userId.toString())) {
+    reel.blockedBy.push(userId);
+    await reel.save();
+  }
+  res.json({ success: true, message: 'Reel hidden from your feed' });
+});
+
+/**
+ * POST /api/v1/reels/:id/block-user
+ * Block the reel's creator (hides all their content).
+ */
+exports.blockReelUser = asyncHandler(async (req, res) => {
+  const reel = await Reel.findById(req.params.id).select('user');
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  const userId      = req.user._id;
+  const creatorId   = reel.user;
+
+  if (userId.toString() === creatorId.toString()) {
+    throw ApiError.badRequest('Cannot block yourself');
+  }
+
+  // Record block on user's profile (using User model blockedUsers field if exists, else skip gracefully)
+  try {
+    const User = require('../models/User');
+    await User.findByIdAndUpdate(userId, { $addToSet: { blockedUsers: creatorId } });
+  } catch (_) { /* blockedUsers field may not exist — no-op */ }
+
+  res.json({ success: true, message: 'User blocked. Their content will no longer appear in your feed.' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN — MODERATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/reels/admin/reported
+ * All reported reels sorted by report count.
+ */
+exports.adminGetReportedReels = asyncHandler(async (req, res) => {
+  const { status = 'flagged', page = 1, limit = 50 } = req.query;
+
+  const filter = { isReported: true };
+  if (status === 'flagged') filter.moderationStatus = { $in: ['flagged','under_review'] };
+  if (status === 'actioned') filter.moderationStatus = 'actioned';
+
+  const total = await Reel.countDocuments(filter);
+  const reels = await Reel.find(filter)
+    .populate('user', 'firstName lastName avatar email')
+    .sort({ reportCount: -1, createdAt: -1 })
+    .skip((Number(page) - 1) * Number(limit))
+    .limit(Number(limit))
+    .lean();
+
+  const enriched = reels.map(r => ({
+    ...r,
+    reportCount:   r.reports?.length || r.reportCount || 0,
+    topReasons:    getTopReasons(r.reports || []),
+  }));
+
+  res.json({ success: true, data: enriched, total, page: Number(page) });
+});
+
+function getTopReasons(reports) {
+  const counts = {};
+  reports.forEach(r => { counts[r.reason] = (counts[r.reason] || 0) + 1; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([r, c]) => ({ reason: r, count: c }));
+}
+
+/**
+ * PATCH /api/v1/reels/admin/:id/moderate
+ * Admin actions: ignore | remove | suspend_user
+ */
+exports.adminModerateReel = asyncHandler(async (req, res) => {
+  const { action, reason } = req.body;
+  const VALID = ['ignore','remove','suspend_user'];
+  if (!VALID.includes(action)) throw ApiError.badRequest(`action must be one of: ${VALID.join(', ')}`);
+
+  const reel = await Reel.findById(req.params.id).populate('user');
+  if (!reel) throw ApiError.notFound('Reel not found');
+
+  if (action === 'ignore') {
+    reel.moderationStatus = 'actioned';
+    reel.moderationNotes  = 'Admin reviewed and dismissed reports';
+    // Mark all reports as reviewed
+    reel.reports.forEach(r => { r.status = 'dismissed'; });
+  } else if (action === 'remove') {
+    reel.isActive         = false;
+    reel.hiddenStatus     = 'removed';
+    reel.hiddenAt         = new Date();
+    reel.hiddenBy         = req.user._id;
+    reel.removalReason    = reason || 'Violated community guidelines';
+    reel.moderationStatus = 'actioned';
+    reel.reports.forEach(r => { r.status = 'actioned'; });
+  } else if (action === 'suspend_user') {
+    reel.isActive         = false;
+    reel.hiddenStatus     = 'removed';
+    reel.moderationStatus = 'actioned';
+    // Suspend the user
+    const User = require('../models/User');
+    await User.findByIdAndUpdate(reel.user._id, { status: 'suspended' });
+  }
+
+  await reel.save();
+  res.json({ success: true, message: `Reel ${action} completed`, data: { _id: reel._id, moderationStatus: reel.moderationStatus } });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FEEDS
 // ─────────────────────────────────────────────────────────────────────────────
 

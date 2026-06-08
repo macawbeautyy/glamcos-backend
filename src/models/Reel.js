@@ -68,6 +68,43 @@ const ReelSchema = new mongoose.Schema(
     isActive:   { type: Boolean, default: true },
     isReported: { type: Boolean, default: false },
     reportCount:{ type: Number,  default: 0 },
+
+    // Extended report tracking
+    reports: [
+      {
+        user:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+        reason:    {
+          type: String,
+          enum: ['copyright_violation', 'spam', 'offensive_content', 'harassment', 'nudity', 'violence', 'misinformation', 'other'],
+          required: true,
+        },
+        details:   { type: String, trim: true, maxlength: 500, default: '' },
+        reportedAt:{ type: Date, default: Date.now },
+        status:    { type: String, enum: ['pending', 'reviewed', 'actioned', 'dismissed'], default: 'pending' },
+      },
+    ],
+    reportedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],  // unique reporters set
+
+    // Hidden status
+    hiddenStatus: {
+      type: String,
+      enum: ['visible', 'hidden_by_user', 'hidden_by_admin', 'removed'],
+      default: 'visible',
+    },
+    hiddenAt:    { type: Date, default: null },
+    hiddenBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    removalReason: { type: String, default: null },
+
+    // Blocked users (users who blocked this reel's creator)
+    blockedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+    // Admin moderation
+    moderationStatus: {
+      type: String,
+      enum: ['clean', 'flagged', 'under_review', 'actioned'],
+      default: 'clean',
+    },
+    moderationNotes: { type: String, default: null },
   },
   {
     timestamps: true,

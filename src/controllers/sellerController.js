@@ -1,10 +1,205 @@
 /**
- * sellerController — Seller registration and management
+ * sellerController — Seller registration, onboarding and management
  */
 const SellerProfile = require('../models/SellerProfile');
 const User          = require('../models/User');
 const Product       = require('../models/Product');
 const Order         = require('../models/Order');
+const axios         = require('axios');
+
+// ── GST Format Validator ───────────────────────────────────────────────────────
+const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+
+// ── Verify / fetch GST data ────────────────────────────────────────────────────
+exports.verifyGST = async (req, res) => {
+  try {
+    const { gstNumber } = req.body;
+    if (!gstNumber) return res.status(400).json({ success: false, message: 'GST number is required' });
+
+    const gst = gstNumber.trim().toUpperCase();
+    if (!GST_REGEX.test(gst)) {
+      return res.status(400).json({ success: false, message: 'Invalid GST number format. Expected: 22AAAAA0000A1Z5' });
+    }
+
+    // Try GST verification via public API (no key needed for basic lookup)
+    let fetchedData = null;
+    let verified = false;
+
+    try {
+      // Use GST search API — fallback if not available
+      const apiKey = process.env.GST_VERIFICATION_API_KEY;
+      if (apiKey) {
+        const resp = await axios.get(`https://sheet.gstincheck.co.in/check/${apiKey}/${gst}`, { timeout: 8000 });
+        if (resp.data && resp.data.data) {
+          const d = resp.data.data;
+          fetchedData = {
+            legalName:           d.lgnm || d.tradeNam || '',
+            tradeName:           d.tradeNam || d.lgnm || '',
+            gstStatus:           d.sts || 'Active',
+            registeredAddress:   d.pradr?.addr ? Object.values(d.pradr.addr).filter(Boolean).join(', ') : '',
+            state:               d.stj ? d.stj.split(' - ')[0] : '',
+            pincode:             d.pradr?.addr?.pncd || '',
+            fetchedAt:           new Date(),
+          };
+          verified = d.sts === 'Active';
+        }
+      }
+    } catch (apiErr) {
+      // API failed — mark for manual review
+    }
+
+    if (fetchedData) {
+      return res.json({
+        success: true,
+        verified,
+        data: fetchedData,
+        message: verified ? 'GST verified successfully' : 'GST found but status is not Active',
+      });
+    }
+
+    // No API key or API failed — validate format only, mark for manual review
+    return res.json({
+      success: true,
+      verified: false,
+      data: null,
+      manualReview: true,
+      message: 'GST format is valid. Will be verified manually by admin.',
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── IFSC Lookup ────────────────────────────────────────────────────────────────
+exports.lookupIFSC = async (req, res) => {
+  try {
+    const { ifsc } = req.params;
+    if (!ifsc) return res.status(400).json({ success: false, message: 'IFSC code is required' });
+
+    const code = ifsc.trim().toUpperCase();
+    // Basic IFSC format: 4 alpha + 0 + 6 alphanumeric
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) {
+      return res.status(400).json({ success: false, message: 'Invalid IFSC format' });
+    }
+
+    const resp = await axios.get(`https://ifsc.razorpay.com/${code}`, { timeout: 8000 });
+    if (resp.data && resp.data.BANK) {
+      return res.json({
+        success: true,
+        data: {
+          bankName:      resp.data.BANK,
+          branchName:    resp.data.BRANCH,
+          branchAddress: resp.data.ADDRESS,
+          city:          resp.data.CITY,
+          state:         resp.data.STATE,
+          contact:       resp.data.CONTACT,
+        },
+      });
+    }
+    return res.status(404).json({ success: false, message: 'IFSC code not found' });
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return res.status(404).json({ success: false, message: 'IFSC code not found' });
+    }
+    res.status(500).json({ success: false, message: 'IFSC lookup failed: ' + err.message });
+  }
+};
+
+// ── Save onboarding step ───────────────────────────────────────────────────────
+exports.saveOnboardingStep = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { step, data } = req.body;
+
+    if (!step || !data) return res.status(400).json({ success: false, message: 'step and data are required' });
+
+    let profile = await SellerProfile.findOne({ user: userId });
+    if (!profile) {
+      profile = new SellerProfile({ user: userId });
+    }
+
+    if (step === 1) {
+      // Business Info
+      const fields = ['businessName','legalBusinessName','businessType','description','phone',
+        'gstNumber','gstVerified','gstStatus','gstFetchedData','businessAddress',
+        'businessState','businessCity','businessPincode'];
+      fields.forEach(f => { if (data[f] !== undefined) profile[f] = data[f]; });
+      // Sync legacy address
+      profile.address = {
+        street:  data.businessAddress || '',
+        city:    data.businessCity    || '',
+        state:   data.businessState   || '',
+        pincode: data.businessPincode || '',
+      };
+      if (profile.onboardingStep < 1) profile.onboardingStep = 1;
+    } else if (step === 2) {
+      // Bank Details
+      if (data.bankAccount) {
+        profile.bankAccount = data.bankAccount;
+        profile.bankName      = data.bankAccount.bankName    || null;
+        profile.branchName    = data.bankAccount.branchName  || null;
+        profile.branchAddress = data.bankAccount.branchAddress || null;
+      }
+      if (profile.onboardingStep < 2) profile.onboardingStep = 2;
+    }
+
+    await profile.save();
+    res.json({ success: true, message: `Step ${step} saved`, data: profile });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Upload document ────────────────────────────────────────────────────────────
+exports.uploadDocument = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { docType } = req.params;   // gstCertificate | brandAuthorizationLetter | manufacturerAuthDocument | businessAddressProof
+    const { url } = req.body;
+
+    const allowed = ['gstCertificate','brandAuthorizationLetter','manufacturerAuthDocument','businessAddressProof'];
+    if (!allowed.includes(docType)) {
+      return res.status(400).json({ success: false, message: 'Invalid document type' });
+    }
+    if (!url) return res.status(400).json({ success: false, message: 'Document URL is required' });
+
+    const profile = await SellerProfile.findOne({ user: userId });
+    if (!profile) return res.status(404).json({ success: false, message: 'Seller profile not found' });
+
+    profile[docType] = { url, status: 'uploaded', uploadedAt: new Date() };
+    await profile.save();
+
+    res.json({ success: true, message: 'Document uploaded', data: profile[docType] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Submit onboarding (final step) ────────────────────────────────────────────
+exports.submitOnboarding = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const profile = await SellerProfile.findOne({ user: userId });
+    if (!profile) return res.status(404).json({ success: false, message: 'Seller profile not found' });
+
+    if (!profile.businessName) {
+      return res.status(400).json({ success: false, message: 'Complete Business Information first' });
+    }
+    if (!profile.gstCertificate?.url) {
+      return res.status(400).json({ success: false, message: 'GST Certificate is required' });
+    }
+
+    profile.onboardingCompleted = true;
+    profile.onboardingStep      = 3;
+    profile.sellerStatus        = 'submitted';
+    profile.status              = 'pending';
+    await profile.save();
+
+    res.json({ success: true, message: 'Onboarding submitted for review', data: profile });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // ── Register as seller ─────────────────────────────────────────────────────────
 exports.registerSeller = async (req, res) => {
@@ -247,6 +442,142 @@ exports.adminGetSellerProducts = async (req, res) => {
       .sort('-createdAt')
       .lean();
     res.json({ success: true, data: products });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: request changes from seller ────────────────────────────────────────
+exports.adminRequestChanges = async (req, res) => {
+  try {
+    const { changes } = req.body;
+    if (!changes || !changes.trim()) {
+      return res.status(400).json({ success: false, message: 'Changes description is required' });
+    }
+    const profile = await SellerProfile.findById(req.params.id);
+    if (!profile) return res.status(404).json({ success: false, message: 'Seller not found' });
+
+    profile.sellerStatus      = 'under_review';
+    profile.status            = 'under_review';
+    profile.requestedChanges  = changes.trim();
+    await profile.save();
+
+    res.json({ success: true, message: 'Changes requested from seller', data: profile });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: review a document ───────────────────────────────────────────────────
+exports.adminReviewDocument = async (req, res) => {
+  try {
+    const { sellerId, docType } = req.params;
+    const { status, reviewNote } = req.body;
+
+    const allowed = ['gstCertificate','brandAuthorizationLetter','manufacturerAuthDocument','businessAddressProof'];
+    if (!allowed.includes(docType)) {
+      return res.status(400).json({ success: false, message: 'Invalid document type' });
+    }
+    if (!['approved','rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be approved or rejected' });
+    }
+
+    const profile = await SellerProfile.findById(sellerId);
+    if (!profile) return res.status(404).json({ success: false, message: 'Seller not found' });
+
+    if (profile[docType]) {
+      profile[docType].status     = status;
+      profile[docType].reviewNote = reviewNote || null;
+      profile.markModified(docType);
+    }
+    await profile.save();
+
+    res.json({ success: true, message: `Document ${status}`, data: profile[docType] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: approve a product ───────────────────────────────────────────────────
+exports.adminApproveProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    product.status        = 'active';
+    product.productStatus = 'approved';
+    product.isActive      = true;
+    product.approvedBy    = req.user._id;
+    product.approvedAt    = new Date();
+    product.rejectionReason = null;
+    await product.save();
+
+    res.json({ success: true, message: 'Product approved', data: product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: reject a product ────────────────────────────────────────────────────
+exports.adminRejectProduct = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason?.trim()) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    product.status          = 'rejected';
+    product.productStatus   = 'rejected';
+    product.isActive        = false;
+    product.rejectionReason = reason.trim();
+    await product.save();
+
+    res.json({ success: true, message: 'Product rejected', data: product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: request product changes ────────────────────────────────────────────
+exports.adminRequestProductChanges = async (req, res) => {
+  try {
+    const { changes } = req.body;
+    if (!changes?.trim()) return res.status(400).json({ success: false, message: 'Changes description is required' });
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    product.productStatus    = 'under_review';
+    product.status           = 'pending_approval';
+    product.requestedChanges = changes.trim();
+    await product.save();
+
+    res.json({ success: true, message: 'Changes requested', data: product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: get all pending products ───────────────────────────────────────────
+exports.adminGetPendingProducts = async (req, res) => {
+  try {
+    const { status = 'pending_approval', seller, category, page = 1, limit = 50 } = req.query;
+    const filter = {};
+    if (status) filter.status = status;
+    if (seller)   filter.seller   = seller;
+    if (category) filter.category = category;
+
+    const total = await Product.countDocuments(filter);
+    const products = await Product.find(filter)
+      .populate('seller', 'firstName lastName email')
+      .populate('category', 'name')
+      .sort('-createdAt')
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .lean();
+
+    res.json({ success: true, data: products, total, page: Number(page) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

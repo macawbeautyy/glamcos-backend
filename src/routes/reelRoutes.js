@@ -25,6 +25,12 @@ const {
   getUserProfile,
   getSavedReels,
   getReelStats,
+  // New
+  reportReel,
+  hideReel,
+  blockReelUser,
+  adminGetReportedReels,
+  adminModerateReel,
 } = require('../controllers/reelController');
 
 // Multer: store file in memory (max 100 MB for videos)
@@ -51,7 +57,9 @@ const thumbUpload = multer({
 router.use(protect);
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
-router.get('/admin/all', getAdminReels);
+router.get('/admin/all',              getAdminReels);
+router.get('/admin/reported',         adminGetReportedReels);
+router.patch('/admin/:id/moderate',   adminModerateReel);
 
 // ── Video upload (bypasses Firebase Storage CORS) ─────────────────────────────
 router.post('/upload-video',     upload.single('video'),         uploadVideo);
@@ -74,10 +82,15 @@ router.delete('/:id',     deleteReel);
 router.get('/:id/stats',  getReelStats);
 
 // ── Engagement ────────────────────────────────────────────────────────────────
-router.post('/:id/view',  incrementView);
-router.post('/:id/like',  toggleLike);
-router.post('/:id/save',  toggleSave);
-router.post('/:id/share', incrementShare);
+router.post('/:id/view',       incrementView);
+router.post('/:id/like',       toggleLike);
+router.post('/:id/save',       toggleSave);
+router.post('/:id/share',      incrementShare);
+
+// ── Moderation (user) ─────────────────────────────────────────────────────────
+router.post('/:id/report',     reportReel);
+router.post('/:id/hide',       hideReel);
+router.post('/:id/block-user', blockReelUser);
 
 // ── Comments ──────────────────────────────────────────────────────────────────
 router.get('/:id/comments',                          getComments);
