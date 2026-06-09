@@ -84,51 +84,42 @@ exports.verifyGST = async (req, res) => {
       };
     };
 
-    // ── 0. User-solved captcha via gstverify.dubey.app (free, no key) ────────
-    if (!fetchedData && sessionId && captcha) {
-      try {
+    // ── 1. Try gstverify.dubey.app with API key (most reliable) ────────────────
+    try {
+      const dubeyKey = process.env.GST_DUBEY_API_KEY;
+      if (dubeyKey) {
+        console.log('[GST] Calling dubey API for', gst);
         const resp = await axios.post(
           'https://api.gstverify.dubey.app/api/v1/gst/details',
-          { sessionId, GSTIN: gst, captcha },
-          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+          { gstin: gst },
+          { headers: { 'X-API-Key': dubeyKey, 'Content-Type': 'application/json' }, timeout: 10000 }
         );
+        console.log('[GST] Dubey response status:', resp.status, 'keys:', Object.keys(resp.data || {}));
         const d = resp.data?.data || resp.data;
         if (d && d.lgnm) {
           fetchedData = parseGSTAPIResponse(d);
           verified    = d.sts === 'Active';
+          console.log('[GST] Got full data from dubey:', fetchedData.tradeName || fetchedData.legalName);
+        } else {
+          console.log('[GST] Dubey returned no lgnm:', JSON.stringify(d)?.substring(0, 200));
         }
-      } catch (_) { /* captcha wrong or expired */ }
+      }
+    } catch (dubeyErr) {
+      console.error('[GST] Dubey API error:', dubeyErr?.response?.status, dubeyErr?.response?.data, dubeyErr?.message);
     }
 
-        // ── 1. Try public GST portal (free, no key required) ─────────────────────
-    try {
-      const portalResp = await axios.get(
-        `https://services.gst.gov.in/services/api/search/gstin?gstin=${gst}`,
-        { timeout: 8000, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
-      );
-      if (portalResp.data?.flag && portalResp.data?.data) {
-        fetchedData = parseGSTAPIResponse(portalResp.data.data);
-        verified    = portalResp.data.data.sts === 'Active';
-      }
-    } catch (_) { /* portal unavailable */ }
-
-    // ── 2. Try gstverify.dubey.app with API key (10 free credits on signup) ───
+    // ── 2. Try public GST portal (free fallback) ──────────────────────────────
     if (!fetchedData) {
       try {
-        const dubeyKey = process.env.GST_DUBEY_API_KEY;
-        if (dubeyKey) {
-          const resp = await axios.post(
-            'https://api.gstverify.dubey.app/api/v1/gst/details',
-            { gstin: gst },
-            { headers: { 'X-API-Key': dubeyKey, 'Content-Type': 'application/json' }, timeout: 10000 }
-          );
-          const d = resp.data?.data || resp.data;
-          if (d && d.lgnm) {
-            fetchedData = parseGSTAPIResponse(d);
-            verified    = d.sts === 'Active';
-          }
+        const portalResp = await axios.get(
+          `https://services.gst.gov.in/services/api/search/gstin?gstin=${gst}`,
+          { timeout: 8000, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
+        );
+        if (portalResp.data?.flag && portalResp.data?.data?.lgnm) {
+          fetchedData = parseGSTAPIResponse(portalResp.data.data);
+          verified    = portalResp.data.data.sts === 'Active';
         }
-      } catch (_) { /* dubey API failed */ }
+      } catch (portalErr) { console.error('[GST] Portal error:', portalErr?.response?.status, portalErr?.message); }
     }
 
     // ── 3. Try gstincheck.co.in with API key (fallback) ───────────────────────
@@ -142,7 +133,7 @@ exports.verifyGST = async (req, res) => {
             verified    = resp.data.data.sts === 'Active';
           }
         }
-      } catch (_) { /* gstincheck API failed */ }
+      } catch (checkErr) { console.error('[GST] gstincheck error:', checkErr?.response?.status, checkErr?.message); }
     }
 
     if (fetchedData) {
