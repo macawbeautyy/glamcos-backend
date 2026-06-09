@@ -414,12 +414,3 @@ ProductSchema.statics.search = function (filters = {}) {
 };
 
 module.exports = mongoose.model('Product', ProductSchema);
-.stock = { $gt: 0 };
-  if (filters.search) {
-    query.$text = { $search: filters.search };
-  }
-
-  return this.find(query);
-};
-
-module.exports = mongoose.model('Product', ProductSchema);
