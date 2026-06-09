@@ -678,6 +678,60 @@ const deleteAccount = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * @desc    Admin: Hard-delete a user + all linked data (cascade)
+ * @route   DELETE /api/v1/auth/admin/users/:id
+ * @access  Superadmin only
+ */
+const adminDeleteUser = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const selfId = (req.user._id || req.user.id).toString();
+  if (id === selfId) {
+    throw ApiError.badRequest('You cannot delete your own account.');
+  }
+
+  const user = await User.findById(id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  const SellerProfile      = require('../models/SellerProfile');
+  const Product            = require('../models/Product');
+  const Order              = require('../models/Order');
+  const Cart               = require('../models/Cart');
+  const Booking            = require('../models/Booking');
+  const Review             = require('../models/Review');
+  const Reel               = require('../models/Reel');
+  const NotificationLog    = require('../models/NotificationLog');
+  const Follow             = require('../models/Follow');
+  const LoyaltyTransaction = require('../models/LoyaltyTransaction');
+  const CategorySuggestion = require('../models/CategorySuggestion');
+  const Provider           = require('../models/Provider');
+
+  const uid = user._id;
+
+  await Promise.all([
+    Product.deleteMany({ seller: uid }),
+    Order.deleteMany({ $or: [{ buyer: uid }, { user: uid }] }),
+    Cart.deleteMany({ user: uid }),
+    Booking.deleteMany({ user: uid }),
+    Review.deleteMany({ user: uid }),
+    Reel.deleteMany({ user: uid }),
+    NotificationLog.deleteMany({ user: uid }),
+    Follow.deleteMany({ $or: [{ follower: uid }, { following: uid }] }),
+    LoyaltyTransaction.deleteMany({ user: uid }),
+    CategorySuggestion.deleteMany({ user: uid }),
+    Provider.deleteMany({ user: uid }),
+    SellerProfile.deleteMany({ user: uid }),
+  ]);
+
+  await User.findByIdAndDelete(uid);
+
+  return ApiResponse.success(res, {
+    data: { deletedUserId: id },
+    message: 'User and all linked data permanently deleted.',
+  });
+});
+
 module.exports = {
   register,
   login,
@@ -696,4 +750,5 @@ module.exports = {
   forgotPassword,
   resetPassword,
   deleteAccount,
+  adminDeleteUser,
 };

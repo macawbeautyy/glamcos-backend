@@ -20,6 +20,7 @@ const {
   forgotPassword,
   resetPassword,
   deleteAccount,
+  adminDeleteUser,
 } = require('../controllers/authController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -77,7 +78,8 @@ router.put('/location',        protect, updateLocation);
 router.delete('/me',           protect, deleteAccount);
 
 // ── Admin Routes ──────────────────────────────────────────────────────────────
-router.get(  '/admin/users',            protect, authorize('admin', 'superadmin'), getAllUsers);
-router.put(  '/admin/users/:id/status', protect, authorize('admin', 'superadmin'), updateUserStatus);
+router.get(   '/admin/users',            protect, authorize('admin', 'superadmin'), getAllUsers);
+router.put(   '/admin/users/:id/status', protect, authorize('admin', 'superadmin'), updateUserStatus);
+router.delete('/admin/users/:id',        protect, authorize('superadmin'),           adminDeleteUser);
 
 module.exports = router;
