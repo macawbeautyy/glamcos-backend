@@ -246,8 +246,11 @@ exports.uploadDocument = async (req, res) => {
     }
     if (!url) return res.status(400).json({ success: false, message: 'Document URL is required' });
 
-    const profile = await SellerProfile.findOne({ user: userId });
-    if (!profile) return res.status(404).json({ success: false, message: 'Seller profile not found' });
+    let profile = await SellerProfile.findOne({ user: userId });
+    if (!profile) {
+      // Auto-create a stub profile so documents can be uploaded before step 1 is saved
+      profile = new SellerProfile({ user: userId });
+    }
 
     profile[docType] = { url, status: 'uploaded', uploadedAt: new Date() };
     await profile.save();
@@ -307,16 +310,46 @@ exports.registerSeller = async (req, res) => {
         await existing.save();
         return res.status(200).json({ success: true, message: 'Reapplication submitted', data: existing });
       }
-      return res.status(400).json({ success: false, message: `Seller profile already exists with status: ${existing.status}` });
+      // Profile already exists and is not rejected — update it with latest data
+      const { businessName, businessType, description, phone, address, gstin, panNumber,
+              legalBusinessName, businessAddress, businessState, businessCity, businessPincode,
+              gstNumber, gstVerified, bankAccount } = req.body;
+      if (businessName)       existing.businessName       = businessName;
+      if (legalBusinessName)  existing.legalBusinessName  = legalBusinessName;
+      if (businessType)       existing.businessType       = businessType;
+      if (description)        existing.description        = description;
+      if (phone)              existing.phone              = phone;
+      if (address)            existing.address            = address;
+      if (gstin)              existing.gstin              = gstin;
+      if (gstNumber)          existing.gstNumber          = gstNumber;
+      if (gstVerified !== undefined) existing.gstVerified = gstVerified;
+      if (panNumber)          existing.panNumber          = panNumber;
+      if (businessAddress)    existing.businessAddress    = businessAddress;
+      if (businessState)      existing.businessState      = businessState;
+      if (businessCity)       existing.businessCity       = businessCity;
+      if (businessPincode)    existing.businessPincode    = businessPincode;
+      if (bankAccount)        existing.bankAccount        = bankAccount;
+      if (existing.status === 'pending' || existing.sellerStatus === 'incomplete') {
+        existing.sellerStatus = 'submitted';
+        existing.status       = 'pending';
+      }
+      await existing.save();
+      return res.status(200).json({ success: true, message: 'Seller profile updated', data: existing });
     }
 
-    const { businessName, businessType, description, phone, address, gstin, panNumber } = req.body;
+    const { businessName, businessType, description, phone, address, gstin, panNumber,
+            legalBusinessName, businessAddress, businessState, businessCity, businessPincode,
+            gstNumber, gstVerified, bankAccount } = req.body;
     if (!businessName || !phone) {
       return res.status(400).json({ success: false, message: 'Business name and phone are required' });
     }
 
     const profile = await SellerProfile.create({
-      user: userId, businessName, businessType, description, phone, address, gstin, panNumber,
+      user: userId, businessName, legalBusinessName, businessType, description, phone,
+      address, gstin, gstNumber, gstVerified, panNumber,
+      businessAddress, businessState, businessCity, businessPincode,
+      bankAccount,
+      sellerStatus: 'submitted', status: 'pending',
     });
 
     res.status(201).json({ success: true, message: 'Seller registration submitted. Awaiting admin approval.', data: profile });
@@ -329,7 +362,8 @@ exports.registerSeller = async (req, res) => {
 exports.getMySeller = async (req, res) => {
   try {
     const profile = await SellerProfile.findOne({ user: req.user._id });
-    if (!profile) return res.status(404).json({ success: false, message: 'Seller profile not found' });
+    // Return null data (not 404) so frontend can check profile existence without a console error
+    if (!profile) return res.json({ success: true, data: null });
     res.json({ success: true, data: profile });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -341,6 +375,17 @@ exports.updateMySeller = async (req, res) => {
   try {
     const profile = await SellerProfile.findOne({ user: req.user._id });
     if (!profile) return res.status(404).json({ success: false, message: 'Seller profile not found' });
+
+    // Handle change requests (seller requests an edit; admin reviews)
+    const changeKeys = Object.keys(req.body).filter(k => k.startsWith('changeRequest_'));
+    if (changeKeys.length > 0) {
+      const changes = changeKeys.map(k => `${k.replace('changeRequest_', '')}: ${req.body[k]}`).join(', ');
+      const existing = profile.requestedChanges ? profile.requestedChanges + '\n' : '';
+      profile.requestedChanges = existing + `[${new Date().toISOString().slice(0,10)}] Seller requested: ${changes}`;
+      profile.sellerStatus = profile.sellerStatus === 'approved' ? 'approved' : profile.sellerStatus;
+      await profile.save();
+      return res.json({ success: true, message: 'Change request submitted', data: profile });
+    }
 
     const allowed = ['businessName', 'businessType', 'description', 'phone', 'address', 'gstin', 'panNumber', 'bankAccount'];
     allowed.forEach((f) => { if (req.body[f] !== undefined) profile[f] = req.body[f]; });
