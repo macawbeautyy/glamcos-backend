@@ -40,14 +40,15 @@ function parseGSTNumber(gst) {
   return { stateCode, state, pan, entityType };
 }
 
-// ── Verify / fetch GST data ────────────────────────────────────────────────────
 // ── GST Captcha proxy ─────────────────────────────────────────────────────────
 exports.getGSTCaptcha = async (req, res) => {
   try {
+    // No API key needed — captcha flow is free
     const resp = await axios.get('https://api.gstverify.dubey.app/api/v1/gst/captcha', { timeout: 10000 });
     return res.json({ success: true, sessionId: resp.data.sessionId, image: resp.data.image });
   } catch (err) {
-    return res.status(502).json({ success: false, message: 'Could not fetch captcha' });
+    console.error('[GST] Captcha fetch error:', err?.response?.status, err?.message);
+    return res.status(502).json({ success: false, message: 'Could not fetch captcha. Please try again.' });
   }
 };
 
@@ -84,56 +85,40 @@ exports.verifyGST = async (req, res) => {
       };
     };
 
-    // ── 1. Try gstverify.dubey.app with API key (most reliable) ────────────────
-    try {
-      const dubeyKey = process.env.GST_DUBEY_API_KEY;
-      if (dubeyKey) {
-        console.log('[GST] Calling dubey API for', gst);
+    // ── 0. Free captcha-based flow (no API key needed, unlimited) ───────────────
+    if (!fetchedData && sessionId && captcha) {
+      try {
         const resp = await axios.post(
           'https://api.gstverify.dubey.app/api/v1/gst/details',
-          { GSTIN: gst },
-          { headers: { 'X-API-Key': dubeyKey, 'Content-Type': 'application/json' }, timeout: 10000 }
+          { sessionId, GSTIN: gst, captcha },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 12000 }
         );
-        console.log('[GST] Dubey response status:', resp.status, 'keys:', Object.keys(resp.data || {}));
+        console.log('[GST] Captcha verify status:', resp.status);
         const d = resp.data?.data || resp.data;
         if (d && d.lgnm) {
           fetchedData = parseGSTAPIResponse(d);
           verified    = d.sts === 'Active';
-          console.log('[GST] Got full data from dubey:', fetchedData.tradeName || fetchedData.legalName);
+          console.log('[GST] Got full data via captcha:', fetchedData.legalName, fetchedData.tradeName);
         } else {
-          console.log('[GST] Dubey returned no lgnm:', JSON.stringify(d)?.substring(0, 200));
+          console.log('[GST] Captcha response no lgnm:', JSON.stringify(d)?.substring(0, 200));
         }
+      } catch (capErr) {
+        console.error('[GST] Captcha verify error:', capErr?.response?.status, capErr?.response?.data?.message || capErr?.message);
       }
-    } catch (dubeyErr) {
-      console.error('[GST] Dubey API error:', dubeyErr?.response?.status, dubeyErr?.response?.data, dubeyErr?.message);
     }
 
-    // ── 2. Try public GST portal (free fallback) ──────────────────────────────
+    // ── 1. GST portal fallback ─────────────────────────────────────────────────
     if (!fetchedData) {
       try {
         const portalResp = await axios.get(
           `https://services.gst.gov.in/services/api/search/gstin?gstin=${gst}`,
-          { timeout: 8000, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
+          { timeout: 6000, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
         );
         if (portalResp.data?.flag && portalResp.data?.data?.lgnm) {
           fetchedData = parseGSTAPIResponse(portalResp.data.data);
           verified    = portalResp.data.data.sts === 'Active';
         }
-      } catch (portalErr) { console.error('[GST] Portal error:', portalErr?.response?.status, portalErr?.message); }
-    }
-
-    // ── 3. Try gstincheck.co.in with API key (fallback) ───────────────────────
-    if (!fetchedData) {
-      try {
-        const apiKey = process.env.GST_VERIFICATION_API_KEY;
-        if (apiKey) {
-          const resp = await axios.get(`https://sheet.gstincheck.co.in/check/${apiKey}/${gst}`, { timeout: 8000 });
-          if (resp.data?.flag && resp.data?.data) {
-            fetchedData = parseGSTAPIResponse(resp.data.data);
-            verified    = resp.data.data.sts === 'Active';
-          }
-        }
-      } catch (checkErr) { console.error('[GST] gstincheck error:', checkErr?.response?.status, checkErr?.message); }
+      } catch (_) { /* portal unavailable */ }
     }
 
     if (fetchedData) {
