@@ -44,7 +44,5 @@ router.use('/notifications',       require('./notificationRoutes'));
 // ── Phase 7: Explore / Reels ──────────────────────────────────────────────────
 router.use('/reels',               require('./reelRoutes'));
 
-// ── One-time seed (remove after use) ─────────────────────────────────────────
-router.use('/seed', require('./seedRoute'));
 
 module.exports = router;
