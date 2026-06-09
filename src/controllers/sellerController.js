@@ -91,7 +91,7 @@ exports.verifyGST = async (req, res) => {
         console.log('[GST] Calling dubey API for', gst);
         const resp = await axios.post(
           'https://api.gstverify.dubey.app/api/v1/gst/details',
-          { gstin: gst },
+          { GSTIN: gst },
           { headers: { 'X-API-Key': dubeyKey, 'Content-Type': 'application/json' }, timeout: 10000 }
         );
         console.log('[GST] Dubey response status:', resp.status, 'keys:', Object.keys(resp.data || {}));
