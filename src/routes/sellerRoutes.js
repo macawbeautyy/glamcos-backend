@@ -17,6 +17,7 @@ const {
   adminGetSellerProducts,
   // New onboarding
   verifyGST,
+  getGSTCaptcha,
   lookupIFSC,
   saveOnboardingStep,
   uploadDocument,
@@ -32,7 +33,8 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 
 // ── Public utilities ───────────────────────────────────────────────────────────
-router.get('/ifsc/:ifsc', lookupIFSC);  // no auth needed
+router.get('/ifsc/:ifsc',     lookupIFSC);    // no auth needed
+router.get('/gst-captcha',    protect, getGSTCaptcha); // proxy captcha image
 
 // ── Onboarding ────────────────────────────────────────────────────────────────
 router.post('/verify-gst',          protect, verifyGST);

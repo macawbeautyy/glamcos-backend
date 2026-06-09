@@ -41,9 +41,19 @@ function parseGSTNumber(gst) {
 }
 
 // ── Verify / fetch GST data ────────────────────────────────────────────────────
+// ── GST Captcha proxy ─────────────────────────────────────────────────────────
+exports.getGSTCaptcha = async (req, res) => {
+  try {
+    const resp = await axios.get('https://api.gstverify.dubey.app/api/v1/gst/captcha', { timeout: 10000 });
+    return res.json({ success: true, sessionId: resp.data.sessionId, image: resp.data.image });
+  } catch (err) {
+    return res.status(502).json({ success: false, message: 'Could not fetch captcha' });
+  }
+};
+
 exports.verifyGST = async (req, res) => {
   try {
-    const { gstNumber } = req.body;
+    const { gstNumber, sessionId, captcha } = req.body;
     if (!gstNumber) return res.status(400).json({ success: false, message: 'GST number is required' });
 
     const gst = gstNumber.trim().toUpperCase();
@@ -74,7 +84,23 @@ exports.verifyGST = async (req, res) => {
       };
     };
 
-    // ── 1. Try public GST portal (free, no key required) ─────────────────────
+    // ── 0. User-solved captcha via gstverify.dubey.app (free, no key) ────────
+    if (!fetchedData && sessionId && captcha) {
+      try {
+        const resp = await axios.post(
+          'https://api.gstverify.dubey.app/api/v1/gst/details',
+          { sessionId, GSTIN: gst, captcha },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+        );
+        const d = resp.data?.data || resp.data;
+        if (d && d.lgnm) {
+          fetchedData = parseGSTAPIResponse(d);
+          verified    = d.sts === 'Active';
+        }
+      } catch (_) { /* captcha wrong or expired */ }
+    }
+
+        // ── 1. Try public GST portal (free, no key required) ─────────────────────
     try {
       const portalResp = await axios.get(
         `https://services.gst.gov.in/services/api/search/gstin?gstin=${gst}`,
