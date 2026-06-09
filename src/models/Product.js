@@ -85,6 +85,11 @@ const ProductSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    bulkPricing: [{
+      minQty: { type: Number, required: true, min: 1 },
+      maxQty: { type: Number, default: null },
+      price:  { type: Number, required: true, min: 0 },
+    }],
 
     // ---- Media ----
     images: {
@@ -401,6 +406,15 @@ ProductSchema.statics.search = function (filters = {}) {
   }
   if (filters.rating) query.rating = { $gte: Number(filters.rating) };
   if (filters.inStock) query.stock = { $gt: 0 };
+  if (filters.search) {
+    query.$text = { $search: filters.search };
+  }
+
+  return this.find(query);
+};
+
+module.exports = mongoose.model('Product', ProductSchema);
+.stock = { $gt: 0 };
   if (filters.search) {
     query.$text = { $search: filters.search };
   }
