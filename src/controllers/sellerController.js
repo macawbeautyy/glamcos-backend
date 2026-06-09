@@ -86,7 +86,26 @@ exports.verifyGST = async (req, res) => {
       }
     } catch (_) { /* portal unavailable */ }
 
-    // ── 2. Try gstincheck.co.in with API key ──────────────────────────────────
+    // ── 2. Try gstverify.dubey.app with API key (10 free credits on signup) ───
+    if (!fetchedData) {
+      try {
+        const dubeyKey = process.env.GST_DUBEY_API_KEY;
+        if (dubeyKey) {
+          const resp = await axios.post(
+            'https://api.gstverify.dubey.app/api/v1/gst/details',
+            { gstin: gst },
+            { headers: { 'X-API-Key': dubeyKey, 'Content-Type': 'application/json' }, timeout: 10000 }
+          );
+          const d = resp.data?.data || resp.data;
+          if (d && d.lgnm) {
+            fetchedData = parseGSTAPIResponse(d);
+            verified    = d.sts === 'Active';
+          }
+        }
+      } catch (_) { /* dubey API failed */ }
+    }
+
+    // ── 3. Try gstincheck.co.in with API key (fallback) ───────────────────────
     if (!fetchedData) {
       try {
         const apiKey = process.env.GST_VERIFICATION_API_KEY;
@@ -97,7 +116,7 @@ exports.verifyGST = async (req, res) => {
             verified    = resp.data.data.sts === 'Active';
           }
         }
-      } catch (_) { /* API key call failed */ }
+      } catch (_) { /* gstincheck API failed */ }
     }
 
     if (fetchedData) {
