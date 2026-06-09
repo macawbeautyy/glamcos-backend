@@ -42,25 +42,26 @@ router.post('/', async (req, res) => {
     const Category = mongoose.models.Category || mongoose.model('Category', CategorySchema);
     const User     = mongoose.models.User     || mongoose.model('User', UserSchema);
 
+    // Upgrade user to superadmin first (need ID for createdBy)
+    const user = await User.findOneAndUpdate(
+      { email: 'macawbeautyy@gmail.com' },
+      { role: 'superadmin' },
+      { new: true }
+    );
+    const adminId = user?._id || new mongoose.Types.ObjectId();
+
     // Wipe old categories
     const deleted = await Category.deleteMany({});
 
     // Seed fresh
     const created = [];
     for (const cat of CATS) {
-      const p = await Category.create({ ...cat.parent, type: 'product' });
+      const p = await Category.create({ ...cat.parent, type: 'product', createdBy: adminId });
       created.push(p.name);
       for (const sub of cat.subs) {
-        await Category.create({ ...sub, type: 'product', parent: p._id });
+        await Category.create({ ...sub, type: 'product', parent: p._id, createdBy: adminId });
       }
     }
-
-    // Upgrade user to superadmin
-    const user = await User.findOneAndUpdate(
-      { email: 'macawbeautyy@gmail.com' },
-      { role: 'superadmin' },
-      { new: true }
-    );
 
     res.json({
       success: true,
