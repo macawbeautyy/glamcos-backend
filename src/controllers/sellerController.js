@@ -10,6 +10,36 @@ const axios         = require('axios');
 // ── GST Format Validator ───────────────────────────────────────────────────────
 const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
+// ── State code → name map (from GST first 2 digits) ──────────────────────────
+const GST_STATE_CODES = {
+  '01': 'Jammu & Kashmir',  '02': 'Himachal Pradesh', '03': 'Punjab',
+  '04': 'Chandigarh',       '05': 'Uttarakhand',      '06': 'Haryana',
+  '07': 'Delhi',            '08': 'Rajasthan',         '09': 'Uttar Pradesh',
+  '10': 'Bihar',            '11': 'Sikkim',            '12': 'Arunachal Pradesh',
+  '13': 'Nagaland',         '14': 'Manipur',           '15': 'Mizoram',
+  '16': 'Tripura',          '17': 'Meghalaya',         '18': 'Assam',
+  '19': 'West Bengal',      '20': 'Jharkhand',         '21': 'Odisha',
+  '22': 'Chhattisgarh',     '23': 'Madhya Pradesh',   '24': 'Gujarat',
+  '25': 'Daman & Diu',      '26': 'Dadra & Nagar Haveli', '27': 'Maharashtra',
+  '28': 'Andhra Pradesh',   '29': 'Karnataka',         '30': 'Goa',
+  '31': 'Lakshadweep',      '32': 'Kerala',            '33': 'Tamil Nadu',
+  '34': 'Puducherry',       '35': 'Andaman & Nicobar', '36': 'Telangana',
+  '37': 'Andhra Pradesh',   '38': 'Ladakh',            '97': 'Other Territory',
+  '99': 'Centre Jurisdiction',
+};
+
+// Extract partial data from GST number itself (no API needed)
+function parseGSTNumber(gst) {
+  const stateCode = gst.substring(0, 2);
+  const pan       = gst.substring(2, 12);  // PAN embedded in GST
+  const state     = GST_STATE_CODES[stateCode] || null;
+  // Entity type from 13th char: P=Proprietor, F=Firm, C=Company, T=Trust, B=Body of Individuals etc.
+  const entityChar = gst.charAt(12);
+  const entityTypes = { P: 'Proprietor', F: 'Firm/LLP', C: 'Company', T: 'Trust', B: 'Body of Individuals', A: 'AOP', K: 'Krishi Kalyan Cess', G: 'Government', L: 'Local Authority', J: 'Artificial Juridical Person', H: 'Hindu Undivided Family (HUF)' };
+  const entityType = entityTypes[entityChar] || 'Business';
+  return { stateCode, state, pan, entityType };
+}
+
 // ── Verify / fetch GST data ────────────────────────────────────────────────────
 exports.verifyGST = async (req, res) => {
   try {
@@ -57,13 +87,23 @@ exports.verifyGST = async (req, res) => {
       });
     }
 
-    // No API key or API failed — validate format only, mark for manual review
+    // No API key or API failed — extract what we can from the GST number itself
+    const parsed = parseGSTNumber(gst);
     return res.json({
       success: true,
       verified: false,
-      data: null,
+      data: {
+        state:       parsed.state,
+        entityType:  parsed.entityType,
+        pan:         parsed.pan,
+        stateCode:   parsed.stateCode,
+        gstStatus:   'Pending Verification',
+        // tradeName and legalName are unknown without API — leave blank so user fills manually
+        tradeName:   '',
+        legalName:   '',
+      },
       manualReview: true,
-      message: 'GST format is valid. Will be verified manually by admin.',
+      message: 'GST format is valid. Business details will be verified manually by admin.',
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -525,60 +565,4 @@ exports.adminRejectProduct = async (req, res) => {
     if (!reason?.trim()) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
 
     const product = await Product.findById(req.params.productId);
-    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-
-    product.status          = 'rejected';
-    product.productStatus   = 'rejected';
-    product.isActive        = false;
-    product.rejectionReason = reason.trim();
-    await product.save();
-
-    res.json({ success: true, message: 'Product rejected', data: product });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// ── Admin: request product changes ────────────────────────────────────────────
-exports.adminRequestProductChanges = async (req, res) => {
-  try {
-    const { changes } = req.body;
-    if (!changes?.trim()) return res.status(400).json({ success: false, message: 'Changes description is required' });
-
-    const product = await Product.findById(req.params.productId);
-    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-
-    product.productStatus    = 'under_review';
-    product.status           = 'pending_approval';
-    product.requestedChanges = changes.trim();
-    await product.save();
-
-    res.json({ success: true, message: 'Changes requested', data: product });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// ── Admin: get all pending products ───────────────────────────────────────────
-exports.adminGetPendingProducts = async (req, res) => {
-  try {
-    const { status = 'pending_approval', seller, category, page = 1, limit = 50 } = req.query;
-    const filter = {};
-    if (status) filter.status = status;
-    if (seller)   filter.seller   = seller;
-    if (category) filter.category = category;
-
-    const total = await Product.countDocuments(filter);
-    const products = await Product.find(filter)
-      .populate('seller', 'firstName lastName email')
-      .populate('category', 'name')
-      .sort('-createdAt')
-      .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit))
-      .lean();
-
-    res.json({ success: true, data: products, total, page: Number(page) });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
+    if
