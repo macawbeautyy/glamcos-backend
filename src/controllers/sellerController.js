@@ -565,4 +565,60 @@ exports.adminRejectProduct = async (req, res) => {
     if (!reason?.trim()) return res.status(400).json({ success: false, message: 'Rejection reason is required' });
 
     const product = await Product.findById(req.params.productId);
-    if
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    product.status          = 'rejected';
+    product.productStatus   = 'rejected';
+    product.isActive        = false;
+    product.rejectionReason = reason.trim();
+    await product.save();
+
+    res.json({ success: true, message: 'Product rejected', data: product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: request product changes ────────────────────────────────────────────
+exports.adminRequestProductChanges = async (req, res) => {
+  try {
+    const { changes } = req.body;
+    if (!changes?.trim()) return res.status(400).json({ success: false, message: 'Changes description is required' });
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    product.productStatus    = 'under_review';
+    product.status           = 'pending_approval';
+    product.requestedChanges = changes.trim();
+    await product.save();
+
+    res.json({ success: true, message: 'Changes requested', data: product });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: get all pending products ───────────────────────────────────────────
+exports.adminGetPendingProducts = async (req, res) => {
+  try {
+    const { status = 'pending_approval', seller, category, page = 1, limit = 50 } = req.query;
+    const filter = {};
+    if (status) filter.status = status;
+    if (seller)   filter.seller   = seller;
+    if (category) filter.category = category;
+
+    const total = await Product.countDocuments(filter);
+    const products = await Product.find(filter)
+      .populate('seller', 'firstName lastName email')
+      .populate('category', 'name')
+      .sort('-createdAt')
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .lean();
+
+    res.json({ success: true, data: products, total, page: Number(page) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
