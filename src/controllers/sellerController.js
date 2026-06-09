@@ -51,31 +51,53 @@ exports.verifyGST = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid GST number format. Expected: 22AAAAA0000A1Z5' });
     }
 
-    // Try GST verification via public API (no key needed for basic lookup)
+    // Try GST verification — multiple sources in priority order
     let fetchedData = null;
     let verified = false;
 
+    // Helper: parse a GST API response (same shape for portal + gstincheck.co.in)
+    const parseGSTAPIResponse = (d) => {
+      if (!d) return null;
+      const addr      = d.pradr?.addr || {};
+      const addrParts = [addr.bno, addr.bnm, addr.flno, addr.st, addr.loc, addr.dst].filter(Boolean);
+      const parsedGST = parseGSTNumber(gst);
+      return {
+        legalName:              d.lgnm     || d.tradeNam || '',
+        tradeName:              d.tradeNam || d.lgnm     || '',
+        gstStatus:              d.sts      || 'Active',
+        registeredAddress:      addrParts.join(', '),
+        state:                  GST_STATE_CODES[gst.substring(0, 2)] || addr.stcd || parsedGST.state || '',
+        pincode:                addr.pncd  || '',
+        constitutionOfBusiness: d.ctb      || parsedGST.entityType   || '',
+        taxpayerType:           d.dty      || '',
+        fetchedAt:              new Date(),
+      };
+    };
+
+    // ── 1. Try public GST portal (free, no key required) ─────────────────────
     try {
-      // Use GST search API — fallback if not available
-      const apiKey = process.env.GST_VERIFICATION_API_KEY;
-      if (apiKey) {
-        const resp = await axios.get(`https://sheet.gstincheck.co.in/check/${apiKey}/${gst}`, { timeout: 8000 });
-        if (resp.data && resp.data.data) {
-          const d = resp.data.data;
-          fetchedData = {
-            legalName:           d.lgnm || d.tradeNam || '',
-            tradeName:           d.tradeNam || d.lgnm || '',
-            gstStatus:           d.sts || 'Active',
-            registeredAddress:   d.pradr?.addr ? Object.values(d.pradr.addr).filter(Boolean).join(', ') : '',
-            state:               d.stj ? d.stj.split(' - ')[0] : '',
-            pincode:             d.pradr?.addr?.pncd || '',
-            fetchedAt:           new Date(),
-          };
-          verified = d.sts === 'Active';
-        }
+      const portalResp = await axios.get(
+        `https://services.gst.gov.in/services/api/search/gstin?gstin=${gst}`,
+        { timeout: 8000, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
+      );
+      if (portalResp.data?.flag && portalResp.data?.data) {
+        fetchedData = parseGSTAPIResponse(portalResp.data.data);
+        verified    = portalResp.data.data.sts === 'Active';
       }
-    } catch (apiErr) {
-      // API failed — mark for manual review
+    } catch (_) { /* portal unavailable */ }
+
+    // ── 2. Try gstincheck.co.in with API key ──────────────────────────────────
+    if (!fetchedData) {
+      try {
+        const apiKey = process.env.GST_VERIFICATION_API_KEY;
+        if (apiKey) {
+          const resp = await axios.get(`https://sheet.gstincheck.co.in/check/${apiKey}/${gst}`, { timeout: 8000 });
+          if (resp.data?.flag && resp.data?.data) {
+            fetchedData = parseGSTAPIResponse(resp.data.data);
+            verified    = resp.data.data.sts === 'Active';
+          }
+        }
+      } catch (_) { /* API key call failed */ }
     }
 
     if (fetchedData) {
