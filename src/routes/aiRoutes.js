@@ -168,4 +168,65 @@ If no clear face is visible, respond ONLY with: NO_FACE_DETECTED`;
   }
 });
 
+
+// ── POST /ai/scan-product ──────────────────────────────────────────────────────
+// Takes a Cloudinary image URL, fetches it, sends to Gemini vision, returns structured
+// product info (name, brand, description, ingredients, activeIngredients).
+router.post('/scan-product', protect, aiLimiter, async (req, res) => {
+  try {
+    const { imageUrl } = req.body;
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return res.status(400).json({ success: false, message: 'imageUrl is required' });
+    }
+
+    // Fetch the image and convert to base64
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) throw new Error('Could not fetch image');
+    const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+    const mime = allowed.find((m) => contentType.includes(m.split('/')[1])) || 'image/jpeg';
+
+    const arrayBuffer = await imgResponse.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    if (base64.length > 5_500_000) {
+      return res.status(400).json({ success: false, message: 'Image too large (max 4MB)' });
+    }
+
+    const systemPrompt = `You are a product recognition AI for a beauty/salon marketplace. Analyse the product image and extract these details in JSON format ONLY. No markdown, no extra text — just valid JSON.
+
+{
+  "name": "Full product name including size if visible",
+  "brand": "Brand name or empty string",
+  "description": "1-2 sentence product description",
+  "ingredients": "Full ingredients list as visible on label, or empty string",
+  "activeIngredients": "Key active ingredients, or empty string"
+}`;
+
+    const contents = [
+      { role: 'user',  parts: [{ text: systemPrompt }] },
+      { role: 'model', parts: [{ text: 'Ready. I will return only valid JSON with the specified fields.' }] },
+      { role: 'user',  parts: [
+        { text: 'Analyse this product image and return the JSON.' },
+        { inlineData: { mimeType: mime, data: base64 } },
+      ]},
+    ];
+
+    const raw = await callGemini(contents);
+
+    // Extract JSON from response
+    let data = {};
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try { data = JSON.parse(jsonMatch[0]); } catch (_) {}
+    }
+
+    logger.info('Product scan completed', { userId: req.user?.id, name: data.name });
+    res.json({ success: true, data });
+
+  } catch (error) {
+    logger.error('Product scan error', { error: error.message });
+    res.status(500).json({ success: false, message: 'AI scan failed. Please fill details manually.' });
+  }
+});
+
 module.exports = router;

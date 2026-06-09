@@ -8,13 +8,14 @@ const {
   createCategory,
   updateCategory,
   deleteCategory,
+  suggestCategory,
+  adminGetSuggestions,
+  adminReviewSuggestion,
 } = require('../controllers/categoryController');
 
 const { protect, authorize, optionalAuth } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const { readLimiter } = require('../middleware/rateLimiter');
-
-// ---- Validation Rules ----
 
 const createCategoryValidation = validate([
   { field: 'name', type: 'string', required: true, min: 2, max: 80, label: 'Category name' },
@@ -36,27 +37,13 @@ router.get('/tree', readLimiter, getCategoryTree);
 router.get('/:id', readLimiter, optionalAuth, getCategory);
 
 // ---- Admin Routes ----
-router.post(
-  '/',
-  protect,
-  authorize('admin', 'superadmin'),
-  createCategoryValidation,
-  createCategory
-);
+router.post('/', protect, authorize('admin', 'superadmin'), createCategoryValidation, createCategory);
+router.put('/:id', protect, authorize('admin', 'superadmin'), updateCategoryValidation, updateCategory);
+router.delete('/:id', protect, authorize('admin', 'superadmin'), deleteCategory);
 
-router.put(
-  '/:id',
-  protect,
-  authorize('admin', 'superadmin'),
-  updateCategoryValidation,
-  updateCategory
-);
-
-router.delete(
-  '/:id',
-  protect,
-  authorize('admin', 'superadmin'),
-  deleteCategory
-);
+// ---- Category Suggestions ----
+router.post('/suggest', protect, suggestCategory);
+router.get('/suggestions/admin', protect, authorize('admin', 'superadmin'), adminGetSuggestions);
+router.patch('/suggestions/:id', protect, authorize('admin', 'superadmin'), adminReviewSuggestion);
 
 module.exports = router;

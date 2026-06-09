@@ -221,6 +221,62 @@ const deleteCategory = asyncHandler(async (req, res) => {
   });
 });
 
+
+// ── Category Suggestions ───────────────────────────────────────────────────
+const CategorySuggestion = require('../models/CategorySuggestion');
+
+// POST /api/v1/categories/suggest  — any logged-in user
+exports.suggestCategory = asyncHandler(async (req, res) => {
+  const { name, type, parentName, reason } = req.body;
+  if (!name || !name.trim()) throw new ApiError(400, 'Category name is required');
+
+  const suggestion = await CategorySuggestion.create({
+    name: name.trim(),
+    type: type || 'product',
+    parentName: parentName || '',
+    reason: reason || '',
+    suggestedBy: req.user._id,
+  });
+
+  return ApiResponse.created(res, { data: suggestion, message: 'Suggestion submitted for admin review' });
+});
+
+// GET /api/v1/categories/suggestions/admin  — admin
+exports.adminGetSuggestions = asyncHandler(async (req, res) => {
+  const { status = 'pending' } = req.query;
+  const filter = status === 'all' ? {} : { status };
+  const suggestions = await CategorySuggestion.find(filter)
+    .populate('suggestedBy', 'firstName lastName email')
+    .sort({ createdAt: -1 });
+  return ApiResponse.success(res, { data: suggestions });
+});
+
+// PATCH /api/v1/categories/suggestions/:id  — admin approve/reject
+exports.adminReviewSuggestion = asyncHandler(async (req, res) => {
+  const { status, adminNote } = req.body;
+  if (!['approved', 'rejected'].includes(status)) throw new ApiError(400, 'status must be approved or rejected');
+
+  const suggestion = await CategorySuggestion.findById(req.params.id);
+  if (!suggestion) throw new ApiError(404, 'Suggestion not found');
+
+  suggestion.status    = status;
+  suggestion.adminNote = adminNote || '';
+
+  if (status === 'approved') {
+    const existing = await Category.findOne({ name: suggestion.name });
+    if (!existing) {
+      const newCat = await Category.create({
+        name:      suggestion.name,
+        type:      suggestion.type,
+        createdBy: req.user._id,
+      });
+      suggestion.createdCategory = newCat._id;
+    }
+  }
+
+  await suggestion.save();
+  return ApiResponse.success(res, { data: suggestion, message: `Suggestion ${status}` });
+});
 module.exports = {
   getCategories,
   getCategoryTree,
@@ -228,4 +284,7 @@ module.exports = {
   createCategory,
   updateCategory,
   deleteCategory,
+  suggestCategory:       exports.suggestCategory,
+  adminGetSuggestions:   exports.adminGetSuggestions,
+  adminReviewSuggestion: exports.adminReviewSuggestion,
 };
