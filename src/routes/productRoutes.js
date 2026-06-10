@@ -6,6 +6,7 @@ const {
   getMyProducts,
   getProduct,
   createProduct,
+  adminCreateProduct,
   updateProduct,
   updateStock,
   deleteProduct,
@@ -117,6 +118,14 @@ router.delete(
 );
 
 // ---- Admin Actions ----
+router.post(
+  '/admin-create',
+  protect,
+  authorize('admin', 'superadmin'),
+  adminCreateProduct
+);
+
+
 router.put(
   '/:id/approve',
   protect,

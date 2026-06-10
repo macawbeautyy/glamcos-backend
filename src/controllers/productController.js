@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const Category = require('../models/Category');
+const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -488,11 +489,54 @@ const getStoreStatsAdmin = asyncHandler(async (req, res) => {
   }, 'Store stats fetched successfully'));
 });
 
+/**
+ * @desc    Admin creates a product on behalf of any user (by email)
+ * @route   POST /api/v1/products/admin-create
+ * @access  Private (Admin / Superadmin)
+ */
+const adminCreateProduct = asyncHandler(async (req, res) => {
+  const {
+    sellerEmail,
+    name, description, shortDescription, category, price,
+    comparePrice, stock, sku, brand, images, thumbnail,
+    tags, variants, specifications,
+    status,
+  } = req.body;
+
+  if (!sellerEmail) throw ApiError.badRequest('sellerEmail is required');
+  const seller = await User.findOne({ email: sellerEmail.toLowerCase().trim() });
+  if (!seller) throw ApiError.badRequest(`No user found with email '${sellerEmail}'`);
+
+  const cat = await Category.findById(category);
+  if (!cat) throw ApiError.badRequest('Category does not exist');
+  if (cat.type === 'service') throw ApiError.badRequest('This category is for services only');
+
+  if (sku) {
+    const existing = await Product.findOne({ sku: sku.toUpperCase() });
+    if (existing) throw ApiError.conflict(`SKU '${sku}' already exists`);
+  }
+
+  const product = await Product.create({
+    name, description, shortDescription, category,
+    seller: seller._id,
+    price, comparePrice, stock, sku, brand, images, thumbnail,
+    tags, variants, specifications,
+    status: status || 'active',   // admin-created products go live immediately
+  });
+
+  await product.populate('category', 'name slug');
+  return ApiResponse.created(res, {
+    data: product,
+    message: `Product created under ${sellerEmail}`,
+  });
+});
+
 module.exports = {
   getProducts,
   getMyProducts,
   getProduct,
   createProduct,
+  adminCreateProduct,
   updateProduct,
   updateStock,
   deleteProduct,
