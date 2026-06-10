@@ -538,6 +538,40 @@ exports.adminUpdateSellerStatus = async (req, res) => {
   }
 };
 
+
+// ── Admin: delete a single seller ──────────────────────────────────────────────
+exports.adminDeleteSeller = async (req, res) => {
+  try {
+    const profile = await SellerProfile.findById(req.params.id);
+    if (!profile) return res.status(404).json({ success: false, message: 'Seller not found' });
+
+    // Downgrade vendor back to regular user
+    await User.findByIdAndUpdate(profile.user, { role: 'user' });
+    await SellerProfile.findByIdAndDelete(req.params.id);
+
+    res.json({ success: true, message: 'Seller deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Admin: delete ALL sellers ──────────────────────────────────────────────────
+exports.adminDeleteAllSellers = async (req, res) => {
+  try {
+    const profiles = await SellerProfile.find({}, '_id user');
+    const userIds = profiles.map(p => p.user).filter(Boolean);
+
+    if (userIds.length) {
+      await User.updateMany({ _id: { $in: userIds }, role: 'vendor' }, { role: 'user' });
+    }
+    const result = await SellerProfile.deleteMany({});
+
+    res.json({ success: true, message: `Deleted ${result.deletedCount} seller(s)`, deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── Admin: get all marketplace orders ─────────────────────────────────────────
 exports.adminGetMarketplaceOrders = async (req, res) => {
   try {

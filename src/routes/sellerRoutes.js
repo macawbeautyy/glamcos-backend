@@ -10,6 +10,8 @@ const {
   updateMySeller,
   getSellerDashboard,
   adminGetSellers,
+  adminDeleteSeller,
+  adminDeleteAllSellers,
   adminApproveSeller,
   adminRejectSeller,
   adminUpdateSellerStatus,
@@ -50,6 +52,8 @@ router.get('/dashboard',   protect, getSellerDashboard);
 
 // ── Admin — Sellers ───────────────────────────────────────────────────────────
 router.get('/admin/all',                    protect, authorize('admin', 'superadmin'), adminGetSellers);
+router.delete('/admin/all',                 protect, authorize('admin', 'superadmin'), adminDeleteAllSellers);
+router.delete('/admin/:id',                 protect, authorize('admin', 'superadmin'), adminDeleteSeller);
 router.put('/admin/:id/approve',            protect, authorize('admin', 'superadmin'), adminApproveSeller);
 router.put('/admin/:id/reject',             protect, authorize('admin', 'superadmin'), adminRejectSeller);
 router.patch('/admin/:id/status',           protect, authorize('admin', 'superadmin'), adminUpdateSellerStatus);
