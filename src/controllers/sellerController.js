@@ -262,6 +262,72 @@ exports.uploadDocument = async (req, res) => {
   }
 };
 
+// ── Upload document FILE (multipart) ────────────────────────────────────────────
+// POST /sellers/onboarding/document/:docType/file  (multer memory storage upstream)
+exports.uploadDocumentFile = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file provided' });
+
+    const userId = req.user._id;
+    const { docType } = req.params;
+    const allowed = ['gstCertificate','brandAuthorizationLetter','manufacturerAuthDocument','businessAddressProof'];
+    if (!allowed.includes(docType)) {
+      return res.status(400).json({ success: false, message: 'Invalid document type' });
+    }
+
+    const FormData = require('form-data');
+    const path     = require('path');
+
+    const cloudName    = process.env.CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
+    const apiKey       = process.env.CLOUDINARY_API_KEY;
+    const apiSecret    = process.env.CLOUDINARY_API_SECRET;
+
+    if (!cloudName) return res.status(503).json({ success: false, message: 'File storage not configured' });
+
+    const isPdf      = req.file.mimetype === 'application/pdf';
+    const ext        = path.extname(req.file.originalname) || (isPdf ? '.pdf' : '.jpg');
+    const folder     = 'seller-documents';
+    const resourceType = isPdf ? 'raw' : 'image';
+
+    const form = new FormData();
+    form.append('file', req.file.buffer, { filename: `${docType}_${userId}_${Date.now()}${ext}`, contentType: req.file.mimetype || 'application/octet-stream' });
+    form.append('folder', folder);
+
+    let fileUrl;
+    if (uploadPreset) {
+      form.append('upload_preset', uploadPreset);
+      const r = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, form, {
+        headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000,
+      });
+      fileUrl = r.data.secure_url;
+    } else if (apiKey && apiSecret) {
+      const crypto    = require('crypto');
+      const timestamp = Math.floor(Date.now() / 1000);
+      const toSign    = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
+      const signature = crypto.createHash('sha1').update(toSign).digest('hex');
+      form.append('api_key', apiKey);
+      form.append('timestamp', String(timestamp));
+      form.append('signature', signature);
+      const r = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, form, {
+        headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000,
+      });
+      fileUrl = r.data.secure_url;
+    } else {
+      return res.status(503).json({ success: false, message: 'File storage credentials not configured' });
+    }
+
+    let profile = await SellerProfile.findOne({ user: userId });
+    if (!profile) profile = new SellerProfile({ user: userId });
+    profile[docType] = { url: fileUrl, status: 'uploaded', uploadedAt: new Date() };
+    await profile.save();
+
+    res.json({ success: true, message: 'Document uploaded', data: profile[docType] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.response?.data?.error?.message || err.message });
+  }
+};
+
 // ── Submit onboarding (final step) ────────────────────────────────────────────
 exports.submitOnboarding = async (req, res) => {
   try {
@@ -669,6 +735,7 @@ exports.adminReviewDocument = async (req, res) => {
 exports.adminApproveProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
 
     product.status        = 'active';

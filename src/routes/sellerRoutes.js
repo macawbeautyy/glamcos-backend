@@ -2,7 +2,19 @@
  * sellerRoutes — /api/v1/sellers
  */
 const express = require('express');
+const multer  = require('multer');
 const router  = express.Router();
+
+// Multer: seller document upload (max 10 MB, images + PDFs)
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only image or PDF files are allowed'), false);
+  },
+});
+
 const {
   // Legacy / existing
   registerSeller,
@@ -23,6 +35,7 @@ const {
   lookupIFSC,
   saveOnboardingStep,
   uploadDocument,
+  uploadDocumentFile,
   submitOnboarding,
   // New admin
   adminRequestChanges,
@@ -42,6 +55,7 @@ router.get('/gst-captcha',    protect, getGSTCaptcha); // relay captcha image to
 router.post('/verify-gst',          protect, verifyGST);
 router.post('/onboarding/step',     protect, saveOnboardingStep);
 router.post('/onboarding/document/:docType', protect, uploadDocument);
+router.post('/onboarding/document/:docType/file', protect, docUpload.single('document'), uploadDocumentFile);
 router.post('/onboarding/submit',   protect, submitOnboarding);
 
 // ── Seller (own) routes ────────────────────────────────────────────────────────
