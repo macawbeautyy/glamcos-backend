@@ -205,7 +205,8 @@ const updateProduct = asyncHandler(async (req, res) => {
     throw ApiError.notFound('Product not found');
   }
 
-  if (product.seller.toString() !== req.user.id) {
+  const isAdminEditor = ['admin', 'superadmin'].includes(req.user.role);
+  if (!isAdminEditor && product.seller.toString() !== req.user.id) {
     throw ApiError.forbidden('You can only update your own products');
   }
 
@@ -214,6 +215,7 @@ const updateProduct = asyncHandler(async (req, res) => {
     'comparePrice', 'stock', 'sku', 'brand', 'images', 'thumbnail',
     'tags', 'variants', 'specifications', 'shippingInfo', 'weight',
     'dimensions', 'trackInventory', 'lowStockThreshold', 'isActive',
+    ...(['admin','superadmin'].includes(req.user.role) ? ['isFeatured', 'status', 'productStatus'] : []),
   ];
 
   const updates = {};
@@ -453,6 +455,39 @@ const getAllProductsAdmin = asyncHandler(async (req, res) => {
   });
 });
 
+
+/**
+ * @desc    Store stats for admin dashboard
+ * @route   GET /api/v1/products/admin/stats
+ * @access  Private (Admin)
+ */
+const getStoreStatsAdmin = asyncHandler(async (req, res) => {
+  const [byStatus, totalSellers, recent] = await Promise.all([
+    Product.aggregate([{ $group: { _id: '$productStatus', count: { $sum: 1 } } }]),
+    Product.distinct('seller').then((s) => s.length),
+    Product.find({})
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .populate('seller', 'name email')
+      .select('name thumbnail productStatus price stock seller createdAt sellerInfo'),
+  ]);
+
+  const counts = { draft: 0, submitted: 0, under_review: 0, approved: 0, rejected: 0, archived: 0 };
+  let total = 0;
+  for (const row of byStatus) {
+    if (row._id in counts) counts[row._id] = row.count;
+    total += row.count;
+  }
+
+  res.json(new ApiResponse(200, {
+    total,
+    counts,
+    pendingApprovals: counts.submitted + counts.under_review,
+    totalSellers,
+    recentSubmissions: recent,
+  }, 'Store stats fetched successfully'));
+});
+
 module.exports = {
   getProducts,
   getMyProducts,
@@ -465,4 +500,5 @@ module.exports = {
   rejectProduct,
   getPendingProducts,
   getAllProductsAdmin,
+  getStoreStatsAdmin,
 };

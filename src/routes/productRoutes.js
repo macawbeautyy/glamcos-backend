@@ -13,6 +13,7 @@ const {
   rejectProduct,
   getPendingProducts,
   getAllProductsAdmin,
+  getStoreStatsAdmin,
 } = require('../controllers/productController');
 
 const { protect, authorize, optionalAuth } = require('../middleware/auth');
@@ -72,6 +73,14 @@ router.get(
   getAllProductsAdmin
 );
 
+// ---- Admin (store stats) — must be before /:id ----
+router.get(
+  '/admin/stats',
+  protect,
+  authorize('admin', 'superadmin'),
+  getStoreStatsAdmin
+);
+
 // ---- Public (single) — :id param comes AFTER specific paths ----
 router.get('/:id', readLimiter, optionalAuth, getProduct);
 
@@ -87,7 +96,7 @@ router.post(
 router.put(
   '/:id',
   protect,
-  authorize('vendor'),
+  authorize('vendor', 'admin', 'superadmin'),
   updateProductValidation,
   updateProduct
 );

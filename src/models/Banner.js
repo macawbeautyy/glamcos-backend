@@ -10,6 +10,8 @@ const BannerSchema = new mongoose.Schema({
   gradientAngle:  { type: Number, default: 135 },
   accentColor:    { type: String, default: '#7C3AED' },
   link:           { type: String, default: '' },
+  ctaText:        { type: String, trim: true, default: '' },
+  ctaLink:        { type: String, trim: true, default: '' },
   isActive:       { type: Boolean, default: true },
   order:          { type: Number, default: 0 },
 }, { timestamps: true });

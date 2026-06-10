@@ -45,4 +45,7 @@ router.use('/notifications',       require('./notificationRoutes'));
 router.use('/reels',               require('./reelRoutes'));
 
 
+// ── Admin maintenance (superadmin only) ──────────────────────────────────────────
+router.use('/admin-maintenance',   require('./maintenanceRoutes'));
+
 module.exports = router;
