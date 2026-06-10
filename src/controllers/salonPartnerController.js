@@ -171,6 +171,18 @@ exports.updateStatus = async (req, res) => {
   }
 };
 
+// DELETE /api/v1/salon-partners/:id — remove an application/partner (admin)
+exports.remove = async (req, res) => {
+  try {
+    const partner = await SalonPartner.findByIdAndDelete(req.params.id);
+    if (!partner) return res.status(404).json({ message: 'Application not found.' });
+    res.json({ message: 'Salon partner deleted.', partner });
+  } catch (err) {
+    console.error('SalonPartner delete error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 // POST /api/v1/salon-partners/my/images — upload a photo (base64)
 exports.uploadImage = async (req, res) => {
   try {

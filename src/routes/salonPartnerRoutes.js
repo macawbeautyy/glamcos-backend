@@ -15,5 +15,6 @@ router.delete('/my/images/:index',   protect,      ctrl.deleteImage);     // del
 // Admin routes
 router.get('/',             protect, authorize('admin','superadmin'), ctrl.list);
 router.patch('/:id/status', protect, authorize('admin','superadmin'), ctrl.updateStatus);
+router.delete('/:id',       protect, authorize('admin','superadmin'), ctrl.remove);
 
 module.exports = router;
