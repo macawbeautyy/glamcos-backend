@@ -6,6 +6,7 @@ const NotificationLog       = require('../models/NotificationLog');
 const ScheduledNotification = require('../models/ScheduledNotification');
 const NotificationTemplate  = require('../models/NotificationTemplate');
 const NotificationOpenEvent = require('../models/NotificationOpenEvent');
+const UserNotification      = require('../models/UserNotification');
 const {
   sendToUser, sendToUsers, sendToAllUsers,
   sendToProviders, sendToCity, sendToInactiveUsers, CH,
@@ -300,6 +301,44 @@ const searchUsersForNotif = asyncHandler(async (req, res) => {
   return ok(res, { users: shaped, total, page:+page, limit:+limit });
 });
 
+// ── USER INBOX (per-user notification center) ──────────────────────────────────
+const getMyNotifications = asyncHandler(async (req, res) => {
+  const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, parseInt(req.query.limit, 10) || 20);
+  const skip  = (page - 1) * limit;
+
+  const [items, total, unreadCount] = await Promise.all([
+    UserNotification.find({ user: req.user.id }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    UserNotification.countDocuments({ user: req.user.id }),
+    UserNotification.countDocuments({ user: req.user.id, read: false }),
+  ]);
+
+  return ok(res, { items, total, page, limit, unreadCount, hasMore: skip + items.length < total });
+});
+
+const getUnreadCount = asyncHandler(async (req, res) => {
+  const count = await UserNotification.countDocuments({ user: req.user.id, read: false });
+  return ok(res, { count });
+});
+
+const markNotificationRead = asyncHandler(async (req, res) => {
+  const notif = await UserNotification.findOneAndUpdate(
+    { _id: req.params.id, user: req.user.id },
+    { read: true, readAt: new Date() },
+    { new: true }
+  );
+  if (!notif) throw ApiError.notFound('Notification not found');
+  return ok(res, notif, 'Marked as read');
+});
+
+const markAllNotificationsRead = asyncHandler(async (req, res) => {
+  await UserNotification.updateMany(
+    { user: req.user.id, read: false },
+    { read: true, readAt: new Date() }
+  );
+  return ok(res, {}, 'All notifications marked as read');
+});
+
 module.exports = {
   sendToSingleUser, sendToMultipleUsers, broadcast,
   notifyProviders, notifyByCity, notifyInactive,
@@ -307,4 +346,5 @@ module.exports = {
   scheduleNotification, getScheduled, cancelScheduled,
   createTemplate, getTemplates, updateTemplate, deleteTemplate, sendFromTemplate,
   searchUsersForNotif,
+  getMyNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead,
 };

@@ -15,6 +15,8 @@ const {
   createTemplate, getTemplates, updateTemplate, deleteTemplate, sendFromTemplate,
   // User search
   searchUsersForNotif,
+  // User inbox
+  getMyNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead,
 } = require('../controllers/notificationController');
 
 const adminOnly = [protect, authorize('admin', 'superadmin')];
@@ -34,6 +36,12 @@ router.get('/stats',           ...adminOnly, getStats);
 
 // ── Open tracking (called by mobile app on notification tap) ──────────────────
 router.post('/opened',         ...userAuth,  trackOpen);
+
+// ── User notification inbox ───────────────────────────────────────────────────
+router.get('/mine',            ...userAuth,  getMyNotifications);
+router.get('/unread-count',    ...userAuth,  getUnreadCount);
+router.patch('/:id/read',      ...userAuth,  markNotificationRead);
+router.patch('/read-all',      ...userAuth,  markAllNotificationsRead);
 
 // ── Scheduled notifications ───────────────────────────────────────────────────
 router.post('/schedule',       ...adminOnly, scheduleNotification);

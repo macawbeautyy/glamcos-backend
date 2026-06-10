@@ -8,7 +8,43 @@
 
 const axios  = require('axios');
 const User   = require('../models/User');
+const UserNotification = require('../models/UserNotification');
 const logger = require('../utils/logger');
+
+// ── Per-user inbox persistence ───────────────────────────────────────────────
+function toInboxDoc(userId, payload) {
+  const data = payload.data || {};
+  return {
+    user:     userId,
+    title:    payload.title,
+    body:     payload.body,
+    type:     data.type || data.action || payload.prefKey || 'general',
+    screen:   data.screen || 'Home',
+    params:   data,
+    imageUrl: payload.imageUrl,
+    channel:  payload.channel || CH.DEFAULT,
+  };
+}
+
+async function persistForUser(userId, payload) {
+  if (!userId) return;
+  try {
+    await UserNotification.create(toInboxDoc(userId, payload));
+  } catch (err) {
+    logger.error('[Notif] persistForUser:', err.message);
+  }
+}
+
+async function persistForUsers(userIds, payload) {
+  if (!userIds?.length) return;
+  try {
+    await UserNotification.insertMany(
+      userIds.map((id) => toInboxDoc(id, payload))
+    );
+  } catch (err) {
+    logger.error('[Notif] persistForUsers:', err.message);
+  }
+}
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
@@ -101,6 +137,7 @@ function buildMessage(token, payload) {
 // ── Audience senders ──────────────────────────────────────────────────────────
 async function sendToUser(userId, payload) {
   if (!userId) return { sent: 0 };
+  persistForUser(userId, payload).catch(() => {});
   try {
     const user = await User.findById(userId).select('fcmTokens notifPrefs').lean();
     if (!user?.fcmTokens?.length) return { sent: 0 };
@@ -114,6 +151,7 @@ async function sendToUser(userId, payload) {
 
 async function sendToUsers(userIds, payload) {
   if (!userIds?.length) return { sent: 0 };
+  persistForUsers(userIds, payload).catch(() => {});
   try {
     const users = await User.find({ _id: { $in: userIds } })
       .select('fcmTokens notifPrefs').lean();
@@ -129,14 +167,15 @@ async function sendToUsers(userIds, payload) {
 
 async function sendToAllUsers(payload, filter = {}) {
   try {
-    const users = await User.find({
+    const allUsers = await User.find({
       ...filter,
-      fcmTokens: { $exists: true, $not: { $size: 0 } },
-      status:    { $ne: 'banned' },
-    }).select('fcmTokens notifPrefs').lean();
+      status: { $ne: 'banned' },
+    }).select('_id fcmTokens notifPrefs').lean();
 
-    const messages = users
-      .filter((u) => checkPref(u.notifPrefs, payload.prefKey))
+    persistForUsers(allUsers.map((u) => u._id), payload).catch(() => {});
+
+    const messages = allUsers
+      .filter((u) => (u.fcmTokens || []).length && checkPref(u.notifPrefs, payload.prefKey))
       .flatMap((u) => (u.fcmTokens || []).map((t) => buildMessage(t, payload)));
 
     logger.info(`[Push] Broadcast to ${messages.length} tokens`);
@@ -220,6 +259,16 @@ const Notif = {
     sendToUser(creatorId, { title: `${followerName} is now following you 🎉`, body: `You have a new follower.`, data: { screen: 'CreatorProfile', userId: followerId }, channel: CH.SOCIAL, prefKey: 'social_alerts' }),
 
   // MARKETPLACE — SELLER
+  sellerDocumentReviewed: (sellerUserId, { docType, status, reviewNote }) =>
+    sendToUser(sellerUserId, {
+      title: status === 'approved' ? `Document Approved ✅` : `Document Needs Attention`,
+      body: status === 'approved'
+        ? `Your ${docType} was approved.`
+        : `Your ${docType} was rejected.${reviewNote ? ` Reason: ${reviewNote}` : ''}`,
+      data: { screen: 'SellerRegistration', docType, status, reviewNote },
+      channel: CH.DEFAULT,
+    }),
+
   newOrderForSeller: (sellerUserId, { orderId, orderNumber, itemCount }) =>
     sendToUser(sellerUserId, { title: `New Order Received 🛍️`, body: `Order #${orderNumber} — ${itemCount} item${itemCount !== 1 ? 's' : ''} ordered from your shop. Tap to fulfil.`, data: { screen: 'SellerOrders', orderId }, channel: CH.ORDERS, priority: 'high', prefKey: 'order_alerts' }),
 

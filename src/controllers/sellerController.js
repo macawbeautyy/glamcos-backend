@@ -6,6 +6,7 @@ const User          = require('../models/User');
 const Product       = require('../models/Product');
 const Order         = require('../models/Order');
 const axios         = require('axios');
+const { Notif }     = require('../services/notifications');
 
 // ── GST Format Validator ───────────────────────────────────────────────────────
 const GST_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
@@ -653,6 +654,10 @@ exports.adminReviewDocument = async (req, res) => {
       profile.markModified(docType);
     }
     await profile.save();
+
+    if (profile.user) {
+      Notif.sellerDocumentReviewed(profile.user, { docType, status, reviewNote }).catch(() => {});
+    }
 
     res.json({ success: true, message: `Document ${status}`, data: profile[docType] });
   } catch (err) {
