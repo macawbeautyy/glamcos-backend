@@ -25,6 +25,7 @@ router.use('/orders',       require('./orderRoutes'));
 router.use('/payments',     require('./paymentRoutes'));
 router.use('/reviews',      require('./reviewRoutes'));
 router.use('/sellers',      require('./sellerRoutes'));
+router.use('/payouts',      require('./payoutRoutes'));
 router.use('/ai', aiRoutes);
 
 // ── Phase 5: Franchise & Salon Spaces ────────────────────────────────────────

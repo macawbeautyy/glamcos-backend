@@ -103,6 +103,7 @@ const SellerProfileSchema = new mongoose.Schema(
       bankName:       { type: String, default: null },
       branchName:     { type: String, default: null },
       branchAddress:  { type: String, default: null },
+      upiId:          { type: String, default: null },
     },
     // Flat mirror fields for easy admin querying
     bankName:      { type: String, default: null },
@@ -112,6 +113,16 @@ const SellerProfileSchema = new mongoose.Schema(
       type: String,
       enum: ['pending', 'verified', 'rejected'],
       default: 'pending',
+    },
+
+    // ── Wallet (manual payout model) ──────────────────────────────────────────
+    wallet: {
+      totalSales:       { type: Number, default: 0 },  // gross item sales (delivered, paid)
+      totalCommission:  { type: Number, default: 0 },  // platform commission deducted
+      pendingEarnings:  { type: Number, default: 0 },  // net earnings inside holding period
+      availableBalance: { type: Number, default: 0 },  // matured, payable now (may go negative after refunds)
+      totalPaidOut:     { type: Number, default: 0 },  // lifetime payouts marked paid
+      refundDeductions: { type: Number, default: 0 },  // lifetime refund deductions
     },
 
     // ── Status ────────────────────────────────────────────────────────────────

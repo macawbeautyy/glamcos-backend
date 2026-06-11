@@ -32,6 +32,7 @@ const requestId = require('./src/middleware/requestId');
 const { apiLimiter } = require('./src/middleware/rateLimiter');
 const { errorHandler, notFoundHandler } = require('./src/middleware/errorHandler');
 const { startNotificationJobs } = require('./src/jobs/notificationJobs');
+const { startPayoutJobs } = require('./src/jobs/payoutJobs');
 
 // =====================================================
 //  Initialize Express App
@@ -179,6 +180,8 @@ const startServer = async () => {
 
     // Start scheduled notification jobs (non-blocking)
     startNotificationJobs();
+    // Start seller payout earnings-release job (non-blocking)
+    startPayoutJobs();
 
     // ... rest of your error handlers
 

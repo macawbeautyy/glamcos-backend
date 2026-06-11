@@ -7,6 +7,7 @@ const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
 const { parsePagination } = require('../utils/helpers');
 const { Notif } = require('../services/notifications');
+const wallet = require('../services/walletService');
 
 const DEFAULT_DELIVERY_FEE  = 49;        // ₹ flat
 const FREE_DELIVERY_AT      = 499;       // orders above this total get free delivery
@@ -264,6 +265,11 @@ const cancelOrder = asyncHandler(async (req, res) => {
   }
   await order.save();
 
+  // Reverse any seller earnings already credited for this order (non-blocking)
+  if (order.payment.status === 'refunded') {
+    wallet.applyRefundForOrder(order, 'Order cancelled — refund').catch(() => {});
+  }
+
   Notif.orderCancelled(order.user, {
     orderId:     order._id,
     orderNumber: order.orderNumber,
@@ -353,6 +359,25 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 
   await order.save();
+
+  // ── Seller wallet hooks (non-blocking, idempotent) ──────────────────────────
+  try {
+    if (itemId) {
+      const line = order.items.id(itemId);
+      if (line && line.status === 'delivered') {
+        wallet.creditEarningForItem(order, line).catch(() => {});
+      } else if (line && ['cancelled', 'returned'].includes(line.status)) {
+        wallet.applyRefundForItem(order, line, `Item ${line.status}`).catch(() => {});
+      }
+    } else if (order.status === 'delivered') {
+      // Whole-order delivered: credit every line (treat lines as delivered)
+      order.items.forEach((l) => { if (!l.status || l.status !== 'delivered') l.status = 'delivered'; });
+      await order.save();
+      wallet.creditEarningsForOrder(order).catch(() => {});
+    } else if (['cancelled', 'returned', 'refunded'].includes(order.status)) {
+      wallet.applyRefundForOrder(order, `Order ${order.status}`).catch(() => {});
+    }
+  } catch (_) { /* wallet errors must never block fulfilment */ }
 
   // Fire shipped/delivered notifications (non-blocking)
   if (order.status === 'shipped') {
