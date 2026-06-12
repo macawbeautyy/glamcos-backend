@@ -32,7 +32,18 @@ const JobSeekerProfileSchema = new mongoose.Schema({
     year:      String,
   }],
 
-  // Status (seekers are auto-approved but profile completeness is tracked)
+  // Admin approval — candidates are visible to employers only once approved
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending',
+    index: true,
+  },
+  rejectionReason: { type: String, default: '' },
+  reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  reviewedAt: { type: Date },
+
+  // Profile completeness tracking
   isProfileComplete: { type: Boolean, default: false },
   profileCompleteness: { type: Number, default: 0 }, // 0-100
 }, { timestamps: true });

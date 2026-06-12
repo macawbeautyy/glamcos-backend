@@ -8,6 +8,11 @@ const {
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
   adminUpdatePlan, adminGetSeekers,
+  getCandidates,
+  getCandidateById,
+  contactCandidate,
+  getMyCandidateContacts,
+  adminReviewSeeker,
 } = require('../controllers/jobRegistrationController');
 
 // ── Employer ──────────────────────────────────────────────────────────────────
@@ -20,6 +25,12 @@ router.post('/seeker/profile',       protect, upsertSeekerProfile);
 router.get('/seeker/me',             protect, getMySeekerProfile);
 
 // ── Plans (public) ────────────────────────────────────────────────────────────
+// ── Candidate browsing (employer side, earning model) ───────────────────────
+router.get('/candidates',            protect, getCandidates);
+router.get('/candidates/contacts',   protect, getMyCandidateContacts);
+router.get('/candidates/:id',        protect, getCandidateById);
+router.post('/candidates/:id/contact', protect, contactCandidate);
+
 router.get('/plans',                 getPlans);
 router.post('/subscribe',            protect, subscribeToPlan);
 
@@ -30,5 +41,6 @@ router.get('/admin/jobs',            protect, authorize('admin', 'superadmin'), 
 router.patch('/admin/jobs/:id',      protect, authorize('admin', 'superadmin'), adminReviewJob);
 router.patch('/admin/plans/:planKey',protect, authorize('admin', 'superadmin'), adminUpdatePlan);
 router.get('/admin/seekers',         protect, authorize('admin', 'superadmin'), adminGetSeekers);
+router.patch('/admin/seekers/:id',   protect, authorize('admin', 'superadmin'), adminReviewSeeker);
 
 module.exports = router;

@@ -20,6 +20,10 @@ const MODEL_MAP = {
   salonAppointments: () => require('../models/SalonAppointment'),
   carts:             () => require('../models/Cart'),
   reviews:           () => require('../models/Review'),
+  jobs:              () => require('../models/Job'),
+  jobSeekers:        () => require('../models/JobSeekerProfile'),
+  jobEmployers:      () => require('../models/EmployerProfile'),
+  candidateContacts: () => require('../models/CandidateContact'),
 };
 
 router.post('/purge', protect, authorize('superadmin'), async (req, res) => {

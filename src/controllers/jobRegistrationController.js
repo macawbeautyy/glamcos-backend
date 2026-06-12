@@ -2,6 +2,7 @@ const EmployerProfile   = require('../models/EmployerProfile');
 const JobSeekerProfile  = require('../models/JobSeekerProfile');
 const SubscriptionPlan  = require('../models/SubscriptionPlan');
 const Job               = require('../models/Job');
+const CandidateContact  = require('../models/CandidateContact');
 const ApiError          = require('../utils/ApiError');
 const ApiResponse       = require('../utils/ApiResponse');
 const asyncHandler      = require('../utils/asyncHandler');
@@ -90,7 +91,19 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
   );
 
-  return ApiResponse.success(res, { data: profile, message: 'Profile saved successfully' });
+  // A rejected candidate who updates their profile goes back into review
+  if (profile.status === 'rejected') {
+    profile.status = 'pending';
+    profile.rejectionReason = '';
+    await profile.save();
+  }
+
+  return ApiResponse.success(res, {
+    data: profile,
+    message: profile.status === 'approved'
+      ? 'Profile saved successfully'
+      : 'Profile saved — awaiting admin approval before employers can see it',
+  });
 });
 
 /** Get my seeker profile */
@@ -158,6 +171,175 @@ const subscribeToPlan = asyncHandler(async (req, res) => {
     data: profile,
     message: `Subscribed to ${plan.name} plan successfully`,
   });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  CANDIDATE BROWSING (Employer side) — the earning model
+//  Employers browse approved candidate profiles freely, but contact details
+//  (phone, email, CV) are masked until they hold an active paid subscription.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const hasActiveSubscription = (employer) =>
+  employer &&
+  employer.subscriptionPlan &&
+  employer.subscriptionPlan !== 'free' &&
+  employer.subscriptionExpiresAt &&
+  new Date(employer.subscriptionExpiresAt) > new Date();
+
+const maskPhone = (p) => (p ? String(p).replace(/.(?=.{2})/g, '•') : null);
+const maskEmail = (e) => {
+  if (!e) return null;
+  const [u, d] = String(e).split('@');
+  if (!d) return '••••';
+  return `${u.slice(0, 2)}••••@${d}`;
+};
+
+function presentCandidate(profile, { unlocked }) {
+  const o = profile.toObject ? profile.toObject() : profile;
+  const userDoc = o.user && typeof o.user === 'object' ? o.user : null;
+  const base = {
+    id: o._id,
+    userId: userDoc?._id || o.user,
+    fullName: o.fullName,
+    profilePhoto: o.profilePhoto || null,
+    title: o.title,
+    bio: o.bio,
+    skills: o.skills || [],
+    experience: o.experience,
+    currentCity: o.currentCity,
+    gender: o.gender || null,
+    preferredJobTypes: o.preferredJobTypes || [],
+    expectedSalary: o.expectedSalary || null,
+    education: o.education || [],
+    portfolioUrls: o.portfolioUrls || [],
+    profileCompleteness: o.profileCompleteness,
+    memberSince: o.createdAt,
+    unlocked: Boolean(unlocked),
+  };
+  if (unlocked) {
+    base.phone = o.phone || userDoc?.phone || null;
+    base.email = userDoc?.email || null;
+    base.cvUrl = o.cvUrl || null;
+    base.cvFilename = o.cvFilename || null;
+  } else {
+    base.phone = maskPhone(o.phone || userDoc?.phone);
+    base.email = maskEmail(userDoc?.email);
+    base.cvUrl = null;
+    base.cvLocked = Boolean(o.cvUrl);
+  }
+  return base;
+}
+
+/** Resolve the calling employer (must be approved) */
+async function requireApprovedEmployer(req) {
+  const employer = await EmployerProfile.findOne({ user: userId(req) });
+  if (!employer) throw ApiError.forbidden('Register as an employer to browse candidates');
+  if (employer.status !== 'approved') {
+    throw ApiError.forbidden('Your employer account must be approved by admin first');
+  }
+  return employer;
+}
+
+/** Employer: browse approved candidate profiles (contact details masked unless subscribed) */
+const getCandidates = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const subscribed = hasActiveSubscription(employer);
+
+  const { search, city, skill, page = 1, limit = 20 } = req.query;
+  const filter = { status: 'approved' };
+  if (city)  filter.currentCity = new RegExp(city, 'i');
+  if (skill) filter.skills = new RegExp(skill, 'i');
+  if (search) {
+    const rx = new RegExp(search, 'i');
+    filter.$or = [{ fullName: rx }, { title: rx }, { skills: rx }, { currentCity: rx }, { bio: rx }];
+  }
+
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const [profiles, total] = await Promise.all([
+    JobSeekerProfile.find(filter)
+      .populate('user', 'email phone')
+      .sort({ profileCompleteness: -1, updatedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit)),
+    JobSeekerProfile.countDocuments(filter),
+  ]);
+
+  // Already-unlocked candidates stay unlocked for this employer
+  const unlockedSet = new Set(
+    (await CandidateContact.find({ employer: userId(req) }).select('seekerProfile'))
+      .map((c) => String(c.seekerProfile))
+  );
+
+  const data = profiles.map((pr) =>
+    presentCandidate(pr, { unlocked: subscribed && unlockedSet.has(String(pr._id)) })
+  );
+
+  return res.json({
+    success: true,
+    data,
+    total,
+    meta: { subscribed, plan: employer.subscriptionPlan, expiresAt: employer.subscriptionExpiresAt },
+  });
+});
+
+/** Employer: single candidate (same masking rules) */
+const getCandidateById = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const subscribed = hasActiveSubscription(employer);
+
+  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
+    .populate('user', 'email phone');
+  if (!profile) throw ApiError.notFound('Candidate not found');
+
+  const already = await CandidateContact.findOne({ employer: userId(req), seekerProfile: profile._id });
+  return ApiResponse.success(res, {
+    data: presentCandidate(profile, { unlocked: subscribed && Boolean(already) }),
+    message: 'Candidate',
+  });
+});
+
+/**
+ * Employer: unlock a candidate's contact details (subscription required)
+ * or mark them as hired. Every action is recorded for the admin audit trail.
+ * @body { action: 'unlock' | 'hire' }
+ */
+const contactCandidate = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  if (!hasActiveSubscription(employer)) {
+    throw ApiError.forbidden('An active subscription is required to view candidate contact details');
+  }
+
+  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
+    .populate('user', 'email phone');
+  if (!profile) throw ApiError.notFound('Candidate not found');
+
+  const action = req.body?.action === 'hire' ? 'hire' : 'unlock';
+  await CandidateContact.create({
+    employer: userId(req),
+    seeker: profile.user?._id || profile.user,
+    seekerProfile: profile._id,
+    action,
+    planAtTime: employer.subscriptionPlan,
+  });
+  if (action === 'hire') {
+    employer.totalHires = (employer.totalHires || 0) + 1;
+    await employer.save();
+  }
+
+  return ApiResponse.success(res, {
+    data: presentCandidate(profile, { unlocked: true }),
+    message: action === 'hire' ? 'Marked as hired' : 'Contact details unlocked',
+  });
+});
+
+/** Employer: list of candidates I have unlocked / hired */
+const getMyCandidateContacts = asyncHandler(async (req, res) => {
+  const contacts = await CandidateContact.find({ employer: userId(req) })
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .populate({ path: 'seekerProfile', select: 'fullName title currentCity profilePhoto phone cvUrl' })
+    .populate('seeker', 'email phone');
+  return ApiResponse.success(res, { data: contacts, message: 'My candidate contacts' });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -290,7 +472,34 @@ const adminGetSeekers = asyncHandler(async (req, res) => {
   return res.json({ success: true, data: profiles, total });
 });
 
+
+/** Admin: approve or reject a candidate profile */
+const adminReviewSeeker = asyncHandler(async (req, res) => {
+  const { action, reason } = req.body; // 'approve' | 'reject'
+  const profile = await JobSeekerProfile.findById(req.params.id);
+  if (!profile) throw ApiError.notFound('Candidate profile not found');
+
+  if (action === 'approve') {
+    profile.status = 'approved';
+  } else if (action === 'reject') {
+    profile.status = 'rejected';
+    profile.rejectionReason = reason || 'Profile not approved';
+  } else {
+    throw ApiError.badRequest('action must be approve or reject');
+  }
+  profile.reviewedBy = userId(req);
+  profile.reviewedAt = new Date();
+  await profile.save();
+
+  return ApiResponse.success(res, { data: profile, message: `Candidate ${action}d` });
+});
+
 module.exports = {
+  getCandidates,
+  getCandidateById,
+  contactCandidate,
+  getMyCandidateContacts,
+  adminReviewSeeker,
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
   upsertSeekerProfile, getMySeekerProfile,
   getPlans, subscribeToPlan,
