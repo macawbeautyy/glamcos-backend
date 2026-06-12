@@ -4,6 +4,8 @@ const JobSeekerProfileSchema = new mongoose.Schema({
   user:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   fullName:    { type: String, required: true, trim: true },
   phone:       { type: String, default: '' },
+  email:       { type: String, default: '', trim: true, lowercase: true }, // used for manual (admin-added) candidates
+  isManual:    { type: Boolean, default: false },  // true when added by admin, no app account
   dateOfBirth: { type: Date },
   gender:      { type: String, enum: ['male', 'female', 'other', ''], default: '' },
   profilePhoto:{ type: String, default: '' }, // URL

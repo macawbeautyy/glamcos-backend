@@ -13,6 +13,10 @@ const {
   contactCandidate,
   getMyCandidateContacts,
   adminReviewSeeker,
+  createSubscriptionOrder,
+  verifySubscriptionPayment,
+  adminCreateSeeker,
+  adminDeleteSeeker,
 } = require('../controllers/jobRegistrationController');
 
 // ── Employer ──────────────────────────────────────────────────────────────────
@@ -33,6 +37,8 @@ router.post('/candidates/:id/contact', protect, contactCandidate);
 
 router.get('/plans',                 getPlans);
 router.post('/subscribe',            protect, subscribeToPlan);
+router.post('/subscribe/order',      protect, createSubscriptionOrder);
+router.post('/subscribe/verify',     protect, verifySubscriptionPayment);
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 router.get('/admin/employers',       protect, authorize('admin', 'superadmin'), adminGetEmployers);
@@ -41,6 +47,8 @@ router.get('/admin/jobs',            protect, authorize('admin', 'superadmin'), 
 router.patch('/admin/jobs/:id',      protect, authorize('admin', 'superadmin'), adminReviewJob);
 router.patch('/admin/plans/:planKey',protect, authorize('admin', 'superadmin'), adminUpdatePlan);
 router.get('/admin/seekers',         protect, authorize('admin', 'superadmin'), adminGetSeekers);
+router.post('/admin/seekers',        protect, authorize('admin', 'superadmin'), adminCreateSeeker);
+router.delete('/admin/seekers/:id',  protect, authorize('admin', 'superadmin'), adminDeleteSeeker);
 router.patch('/admin/seekers/:id',   protect, authorize('admin', 'superadmin'), adminReviewSeeker);
 
 module.exports = router;

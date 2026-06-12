@@ -3,6 +3,19 @@ const JobSeekerProfile  = require('../models/JobSeekerProfile');
 const SubscriptionPlan  = require('../models/SubscriptionPlan');
 const Job               = require('../models/Job');
 const CandidateContact  = require('../models/CandidateContact');
+const crypto            = require('crypto');
+const mongoose          = require('mongoose');
+
+let Razorpay = null;
+try { Razorpay = require('razorpay'); } catch { Razorpay = null; }
+
+function getRazorpayClient() {
+  if (!Razorpay) throw ApiError.internal('Razorpay SDK not installed on the server');
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) throw ApiError.internal('Razorpay credentials not configured');
+  return new Razorpay({ key_id: keyId, key_secret: keySecret });
+}
 const ApiError          = require('../utils/ApiError');
 const ApiResponse       = require('../utils/ApiResponse');
 const asyncHandler      = require('../utils/asyncHandler');
@@ -154,6 +167,11 @@ const subscribeToPlan = asyncHandler(async (req, res) => {
   const plan = await SubscriptionPlan.findOne({ planKey, isActive: true });
   if (!plan) throw ApiError.notFound('Plan not found');
 
+  // Paid plans must go through Razorpay (/subscribe/order + /subscribe/verify)
+  if (plan.price > 0) {
+    throw ApiError.badRequest('This plan requires payment. Use the payment flow in the app.');
+  }
+
   const profile = await EmployerProfile.findOne({ user: userId(req) });
   if (!profile) throw ApiError.badRequest('Please register as an employer first');
   if (profile.status !== 'approved') throw ApiError.badRequest('Your employer account must be approved before subscribing');
@@ -218,12 +236,12 @@ function presentCandidate(profile, { unlocked }) {
   };
   if (unlocked) {
     base.phone = o.phone || userDoc?.phone || null;
-    base.email = userDoc?.email || null;
+    base.email = userDoc?.email || o.email || null;
     base.cvUrl = o.cvUrl || null;
     base.cvFilename = o.cvFilename || null;
   } else {
     base.phone = maskPhone(o.phone || userDoc?.phone);
-    base.email = maskEmail(userDoc?.email);
+    base.email = maskEmail(userDoc?.email || o.email);
     base.cvUrl = null;
     base.cvLocked = Boolean(o.cvUrl);
   }
@@ -340,6 +358,139 @@ const getMyCandidateContacts = asyncHandler(async (req, res) => {
     .populate({ path: 'seekerProfile', select: 'fullName title currentCity profilePhoto phone cvUrl' })
     .populate('seeker', 'email phone');
   return ApiResponse.success(res, { data: contacts, message: 'My candidate contacts' });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SUBSCRIPTION PAYMENTS (Razorpay)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Create a Razorpay order for a paid subscription plan.
+ * @route POST /api/v1/job-registration/subscribe/order
+ * @body  { planKey }
+ */
+const createSubscriptionOrder = asyncHandler(async (req, res) => {
+  const { planKey } = req.body;
+  const plan = await SubscriptionPlan.findOne({ planKey, isActive: true });
+  if (!plan) throw ApiError.notFound('Plan not found');
+  if (plan.price <= 0) throw ApiError.badRequest('This plan is free — no payment needed');
+
+  const profile = await EmployerProfile.findOne({ user: userId(req) });
+  if (!profile) throw ApiError.badRequest('Register as an employer first');
+  if (profile.status !== 'approved') throw ApiError.badRequest('Your employer account must be approved before subscribing');
+
+  const client = getRazorpayClient();
+  const rzpOrder = await client.orders.create({
+    amount: Math.round(plan.price * 100),
+    currency: 'INR',
+    receipt: `JOBSUB-${Date.now().toString(36).toUpperCase()}`,
+    notes: { type: 'job_subscription', planKey, userId: userId(req) },
+  });
+
+  return ApiResponse.success(res, {
+    data: {
+      razorpayOrderId: rzpOrder.id,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency,
+      keyId: process.env.RAZORPAY_KEY_ID,
+      plan: { planKey: plan.planKey, name: plan.name, price: plan.price, durationDays: plan.durationDays },
+    },
+    message: 'Subscription order created',
+  });
+});
+
+/**
+ * Verify Razorpay payment and activate the plan.
+ * @route POST /api/v1/job-registration/subscribe/verify
+ * @body  { planKey, razorpayOrderId, razorpayPaymentId, razorpaySignature }
+ */
+const verifySubscriptionPayment = asyncHandler(async (req, res) => {
+  const { planKey, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  if (!planKey || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    throw ApiError.badRequest('planKey, razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
+  }
+
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
+
+  const expected = crypto
+    .createHmac('sha256', keySecret)
+    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+    .digest('hex');
+  if (expected !== razorpaySignature) {
+    throw ApiError.badRequest('Payment signature verification failed');
+  }
+
+  const plan = await SubscriptionPlan.findOne({ planKey, isActive: true });
+  if (!plan) throw ApiError.notFound('Plan not found');
+
+  const profile = await EmployerProfile.findOne({ user: userId(req) });
+  if (!profile) throw ApiError.badRequest('Employer profile not found');
+
+  const expiresAt = new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000);
+  profile.subscriptionPlan      = plan.planKey;
+  profile.subscriptionExpiresAt = expiresAt;
+  profile.subscriptionPaidAt    = new Date();
+  profile.subscriptionAmount    = plan.price;
+  await profile.save();
+
+  return ApiResponse.success(res, {
+    data: { plan: plan.planKey, expiresAt, paymentId: razorpayPaymentId },
+    message: `${plan.name} plan activated`,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ADMIN — MANUAL CANDIDATE LISTING
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Admin: manually add a candidate profile (walk-in / WhatsApp CV etc.)
+ * Created pre-approved with a synthetic user id (no app account needed).
+ * @route POST /api/v1/job-registration/admin/seekers
+ */
+const adminCreateSeeker = asyncHandler(async (req, res) => {
+  const {
+    fullName, phone, email, currentCity, title, bio, gender,
+    skills, experience, expectedSalary, cvUrl, preferredJobTypes,
+  } = req.body;
+
+  if (!fullName || !fullName.trim()) throw ApiError.badRequest('fullName is required');
+  if (!phone || !/^[6-9]\d{9}$/.test(String(phone).trim())) {
+    throw ApiError.badRequest('A valid 10-digit phone number is required');
+  }
+
+  const dup = await JobSeekerProfile.findOne({ phone: String(phone).trim(), isManual: true });
+  if (dup) throw ApiError.badRequest(`A manual candidate with this phone already exists (${dup.fullName})`);
+
+  const profile = await JobSeekerProfile.create({
+    user: new mongoose.Types.ObjectId(),   // synthetic — no app account
+    isManual: true,
+    fullName: fullName.trim(),
+    phone: String(phone).trim(),
+    email: (email || '').trim(),
+    currentCity: (currentCity || '').trim(),
+    title: (title || '').trim(),
+    bio: (bio || '').trim(),
+    gender: gender || '',
+    skills: Array.isArray(skills) ? skills : String(skills || '').split(',').map((x) => x.trim()).filter(Boolean),
+    experience: (experience || '').trim(),
+    expectedSalary: expectedSalary || { min: 0, max: 0 },
+    cvUrl: (cvUrl || '').trim(),
+    preferredJobTypes: preferredJobTypes || [],
+    status: 'approved',          // admin-added → instantly visible to employers
+    reviewedBy: userId(req),
+    reviewedAt: new Date(),
+  });
+
+  return ApiResponse.created(res, { data: profile, message: 'Candidate added and approved' });
+});
+
+/** Admin: delete a candidate profile */
+const adminDeleteSeeker = asyncHandler(async (req, res) => {
+  const profile = await JobSeekerProfile.findByIdAndDelete(req.params.id);
+  if (!profile) throw ApiError.notFound('Candidate profile not found');
+  return ApiResponse.success(res, { data: { id: req.params.id }, message: 'Candidate deleted' });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -495,6 +646,10 @@ const adminReviewSeeker = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  createSubscriptionOrder,
+  verifySubscriptionPayment,
+  adminCreateSeeker,
+  adminDeleteSeeker,
   getCandidates,
   getCandidateById,
   contactCandidate,
