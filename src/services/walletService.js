@@ -64,25 +64,33 @@ async function creditEarningForItem(order, item) {
       throw e;
     }
 
-    // Informational commission debit (gross − commission = net credited above)
-    await SellerLedgerEntry.create({
-      seller: item.seller,
-      type: 'commission',
-      direction: 'debit',
-      amount: commission,
-      grossAmount: gross,
-      commissionPercent: pct,
-      description: `Platform commission (${pct}%) on order ${order.orderNumber} — ${item.name}`,
-      referenceId: order.orderNumber,
-      order: order._id,
-      orderItem: null, // keep unique index free for sale_credit
-    });
-
+    // Credit the wallet as soon as the sale_credit entry is recorded, so a
+    // failure below (informational commission entry) can never leave the
+    // ledger and wallet balance out of sync.
     await incWallet(item.seller, {
       'wallet.totalSales':      gross,
       'wallet.totalCommission': commission,
       'wallet.pendingEarnings': net,
     });
+
+    // Informational commission debit (gross − commission = net credited above)
+    try {
+      await SellerLedgerEntry.create({
+        seller: item.seller,
+        type: 'commission',
+        direction: 'debit',
+        amount: commission,
+        grossAmount: gross,
+        commissionPercent: pct,
+        description: `Platform commission (${pct}%) on order ${order.orderNumber} — ${item.name}`,
+        referenceId: order.orderNumber,
+        order: order._id,
+        orderItem: null, // keep unique index free for sale_credit
+      });
+    } catch (e) {
+      // Wallet balance already credited above — don't let this fail the call.
+      logger.error(`[Wallet] commission ledger entry failed for order ${order.orderNumber}: ${e.message}`);
+    }
 
     logger.info(`[Wallet] +₹${net} pending for seller ${item.seller} (order ${order.orderNumber})`);
     return entry;
