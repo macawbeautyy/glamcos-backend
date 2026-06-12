@@ -51,4 +51,48 @@ router.post('/purge', protect, authorize('superadmin'), async (req, res) => {
   }
 });
 
+
+/**
+ * POST /api/v1/admin-maintenance/backfill-product-details
+ * Body: { dryRun?: boolean }
+ *
+ * Fills missing PDP content (benefits, ingredients, how-to-use, safety,
+ * specifications, short description, country of origin) for ALL products
+ * that don't have it yet. Seller-provided content is never overwritten.
+ */
+router.post('/backfill-product-details', protect, authorize('admin', 'superadmin'), async (req, res) => {
+  try {
+    const Product = require('../models/Product');
+    const { generateMissingDetails } = require('../services/productDetailGenerator');
+    const dryRun = Boolean(req.body?.dryRun);
+
+    const products = await Product.find({})
+      .select('name brand description tags category shortDescription benefits howToUse ingredients activeIngredients safetyInstructions specifications countryOfOrigin weight volume sku')
+      .populate('category', 'name');
+
+    let updated = 0;
+    const samples = [];
+    for (const product of products) {
+      const { bucket, updates } = generateMissingDetails(product);
+      const keys = Object.keys(updates);
+      if (keys.length === 0) continue;
+      if (!dryRun) {
+        await Product.updateOne({ _id: product._id }, { $set: updates });
+      }
+      updated += 1;
+      if (samples.length < 10) samples.push({ id: product._id, name: product.name, bucket, fieldsFilled: keys });
+    }
+
+    return res.json({
+      success: true,
+      message: dryRun
+        ? `Dry run: ${updated} of ${products.length} products would be updated`
+        : `Filled missing details on ${updated} of ${products.length} products`,
+      data: { totalProducts: products.length, updated, dryRun, samples },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
