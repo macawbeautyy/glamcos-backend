@@ -7,6 +7,7 @@
  */
 
 const axios  = require('axios');
+const admin  = require('../config/firebase');
 const User   = require('../models/User');
 const UserNotification = require('../models/UserNotification');
 const logger = require('../utils/logger');
@@ -62,37 +63,77 @@ const CH = {
 // ── Core send ─────────────────────────────────────────────────────────────────
 async function sendPush(messages) {
   const batch = Array.isArray(messages) ? messages : [messages];
-  const valid = batch.filter(
-    (m) => typeof m.to === 'string' && m.to.startsWith('ExponentPushToken[')
-  );
-  if (valid.length === 0) return { sent: 0 };
+  const candidates = batch.filter((m) => typeof m.to === 'string' && m.to.length > 0);
+  if (candidates.length === 0) return { sent: 0 };
 
-  // Batch into 100-message chunks (Expo limit)
-  const chunks = [];
-  for (let i = 0; i < valid.length; i += 100) chunks.push(valid.slice(i, i + 100));
+  const expoMsgs = candidates.filter((m) => m.to.startsWith('ExponentPushToken['));
+  const fcmMsgs  = candidates.filter((m) => !m.to.startsWith('ExponentPushToken['));
 
   let totalSent = 0;
   const staleTokens = [];
 
-  for (const chunk of chunks) {
-    try {
-      const { data } = await axios.post(EXPO_PUSH_URL, chunk, {
-        headers: {
-          Accept:            'application/json',
-          'Accept-Encoding': 'gzip, deflate',
-          'Content-Type':    'application/json',
-        },
-        timeout: 15_000,
-      });
-      totalSent += chunk.length;
-      // Collect DeviceNotRegistered tokens for cleanup
-      (data?.data || []).forEach((r, i) => {
-        if (r.status === 'error' && r.details?.error === 'DeviceNotRegistered') {
-          staleTokens.push(chunk[i].to);
-        }
-      });
-    } catch (err) {
-      logger.error('[Push] Chunk send failed:', err.message);
+  // ── Expo tokens ───────────────────────────────────────────────
+  if (expoMsgs.length) {
+    const chunks = [];
+    for (let i = 0; i < expoMsgs.length; i += 100) chunks.push(expoMsgs.slice(i, i + 100));
+
+    for (const chunk of chunks) {
+      try {
+        const { data } = await axios.post(EXPO_PUSH_URL, chunk, {
+          headers: {
+            Accept:            'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Content-Type':    'application/json',
+          },
+          timeout: 15_000,
+        });
+        totalSent += chunk.length;
+        (data?.data || []).forEach((r, i) => {
+          if (r.status === 'error' && r.details?.error === 'DeviceNotRegistered') {
+            staleTokens.push(chunk[i].to);
+          }
+        });
+      } catch (err) {
+        logger.error('[Push] Expo chunk send failed:', err.response?.data || err.message || err);
+      }
+    }
+  }
+
+  // ── Native FCM tokens (firebase-admin) ──────────────────────────
+  if (fcmMsgs.length) {
+    const chunks = [];
+    for (let i = 0; i < fcmMsgs.length; i += 500) chunks.push(fcmMsgs.slice(i, i + 500));
+
+    for (const chunk of chunks) {
+      const m = chunk[0];
+      const dataStr = Object.fromEntries(
+        Object.entries(m.data || {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
+      );
+      try {
+        const result = await admin.messaging().sendEachForMulticast({
+          tokens: chunk.map((c) => c.to),
+          notification: { title: m.title, body: m.body },
+          data: dataStr,
+          android: {
+            priority: m.priority === 'high' ? 'high' : 'normal',
+            notification: { channelId: m.channelId || 'default', sound: m.sound || 'default' },
+          },
+          apns: {
+            payload: { aps: { sound: m.sound || 'default', badge: m.badge ?? 1 } },
+          },
+        });
+        totalSent += result.successCount;
+        result.responses.forEach((r, i) => {
+          if (!r.success) {
+            const code = r.error?.code || '';
+            if (code.includes('registration-token-not-registered') || code.includes('invalid-argument')) {
+              staleTokens.push(chunk[i].to);
+            }
+          }
+        });
+      } catch (err) {
+        logger.error('[Push] FCM chunk send failed:', err.message || err);
+      }
     }
   }
 
