@@ -34,59 +34,59 @@ async function logSend(data) {
 
 // ── SEND ENDPOINTS ─────────────────────────────────────────────────────────────
 const sendToSingleUser = asyncHandler(async (req, res) => {
-  const { userId, title, body, screen, channel, imageUrl } = req.body;
+  const { userId, title, body, screen, url, channel, imageUrl } = req.body;
   if (!userId || !title || !body) throw ApiError.badRequest('userId, title and body are required');
-  const payload = { title, body, data: { screen: screen||'Home' }, channel: channel||CH.DEFAULT, ...(imageUrl&&{imageUrl}) };
+  const payload = { title, body, data: { screen: screen||'Home', ...(url&&{url}) }, channel: channel||CH.DEFAULT, ...(imageUrl&&{imageUrl}) };
   const result  = await doSend('user', payload, { userId });
   await logSend({ title, body, audience:'user', channel:channel||'default', screen:screen||'Home', imageUrl, sentBy:req.user.id, sentCount:result.sent||0, removed:result.removed||0, targetIds:[userId] });
   return ok(res, result, `Sent (${result.sent} tokens)`);
 });
 
 const sendToMultipleUsers = asyncHandler(async (req, res) => {
-  const { userIds, title, body, screen, channel, imageUrl } = req.body;
+  const { userIds, title, body, screen, url, channel, imageUrl } = req.body;
   if (!Array.isArray(userIds)||!userIds.length||!title||!body) throw ApiError.badRequest('userIds[], title, body required');
   if (userIds.length > 1000) throw ApiError.badRequest('Max 1000 userIds per request');
-  const payload = { title, body, data: { screen: screen||'Home' }, channel: channel||CH.DEFAULT };
+  const payload = { title, body, data: { screen: screen||'Home', ...(url&&{url}) }, channel: channel||CH.DEFAULT };
   const result  = await doSend('users', payload, { userIds });
   await logSend({ title, body, audience:'users', channel:channel||'default', screen:screen||'Home', imageUrl, sentBy:req.user.id, sentCount:result.sent||0, removed:result.removed||0, targetIds:userIds });
   return ok(res, result, `Sent (${result.sent} tokens)`);
 });
 
 const broadcast = asyncHandler(async (req, res) => {
-  const { title, body, screen, channel, imageUrl, role, city } = req.body;
+  const { title, body, screen, url, channel, imageUrl, role, city } = req.body;
   if (!title||!body) throw ApiError.badRequest('title and body are required');
   const filter = {};
   if (role) filter.role = role;
   if (city) filter['location.city'] = { $regex: new RegExp(`^${city}$`,'i') };
-  const payload = { title, body, data: { screen: screen||'Home' }, channel: channel||CH.PROMOTIONS };
+  const payload = { title, body, data: { screen: screen||'Home', ...(url&&{url}) }, channel: channel||CH.PROMOTIONS };
   const result  = await doSend('all', payload, { filter });
   await logSend({ title, body, audience:'all', channel:channel||'promotions', screen:screen||'Home', imageUrl, sentBy:req.user.id, sentCount:result.sent||0, removed:result.removed||0, city });
   return ok(res, result, `Broadcast sent (${result.sent} tokens)`);
 });
 
 const notifyProviders = asyncHandler(async (req, res) => {
-  const { title, body, screen, imageUrl } = req.body;
+  const { title, body, screen, url, imageUrl } = req.body;
   if (!title||!body) throw ApiError.badRequest('title and body are required');
-  const payload = { title, body, data: { screen: screen||'ProviderDashboard' }, channel: CH.PROVIDER };
+  const payload = { title, body, data: { screen: screen||'ProviderDashboard', ...(url&&{url}) }, channel: CH.PROVIDER };
   const result  = await doSend('providers', payload);
   await logSend({ title, body, audience:'providers', channel:'provider', screen:screen||'ProviderDashboard', imageUrl, sentBy:req.user.id, sentCount:result.sent||0, removed:result.removed||0 });
   return ok(res, result, `Provider notification sent (${result.sent} tokens)`);
 });
 
 const notifyByCity = asyncHandler(async (req, res) => {
-  const { city, title, body, screen, imageUrl } = req.body;
+  const { city, title, body, screen, url, imageUrl } = req.body;
   if (!city||!title||!body) throw ApiError.badRequest('city, title, body required');
-  const payload = { title, body, data: { screen: screen||'Home' }, channel: CH.PROMOTIONS };
+  const payload = { title, body, data: { screen: screen||'Home', ...(url&&{url}) }, channel: CH.PROMOTIONS };
   const result  = await doSend('city', payload, { city });
   await logSend({ title, body, audience:'city', channel:'promotions', screen:screen||'Home', imageUrl, sentBy:req.user.id, sentCount:result.sent||0, removed:result.removed||0, city });
   return ok(res, result, `City notification sent to ${city}`);
 });
 
 const notifyInactive = asyncHandler(async (req, res) => {
-  const { daysSince=14, title, body, screen, imageUrl } = req.body;
+  const { daysSince=14, title, body, screen, url, imageUrl } = req.body;
   if (!title||!body) throw ApiError.badRequest('title and body are required');
   if (daysSince<1||daysSince>365) throw ApiError.badRequest('daysSince must be 1–365');
-  const payload = { title, body, data: { screen: screen||'Home' }, channel: CH.PROMOTIONS };
+  const payload = { title, body, data: { screen: screen||'Home', ...(url&&{url}) }, channel: CH.PROMOTIONS };
   const result  = await doSend('inactive', payload, { daysSince: Number(daysSince) });
   await logSend({ title, body, audience:'inactive', channel:'promotions', screen:screen||'Home', imageUrl, sentBy:req.user.id, sentCount:result.sent||0, removed:result.removed||0, daysSince });
   return ok(res, result, `Re-engagement sent (${result.sent} tokens)`);
@@ -176,12 +176,12 @@ const trackOpen = asyncHandler(async (req, res) => {
 
 // ── SCHEDULED NOTIFICATIONS ───────────────────────────────────────────────────
 const scheduleNotification = asyncHandler(async (req, res) => {
-  const { title, body, screen, channel, imageUrl, audience, city, daysSince, targetIds, scheduledAt, timezone } = req.body;
+  const { title, body, screen, url, channel, imageUrl, audience, city, daysSince, targetIds, scheduledAt, timezone } = req.body;
   if (!title||!body||!audience||!scheduledAt) throw ApiError.badRequest('title, body, audience, scheduledAt required');
   const at = new Date(scheduledAt);
   if (at <= new Date()) throw ApiError.badRequest('scheduledAt must be in the future');
   const sn = await ScheduledNotification.create({
-    title, body, screen:screen||'Home', channel:channel||'default', imageUrl,
+    title, body, screen:screen||'Home', url, channel:channel||'default', imageUrl,
     audience, city, daysSince, targetIds,
     scheduledAt: at, timezone: timezone||'Asia/Kolkata',
     createdBy: req.user.id,
@@ -205,10 +205,10 @@ const cancelScheduled = asyncHandler(async (req, res) => {
 
 // ── TEMPLATES ─────────────────────────────────────────────────────────────────
 const createTemplate = asyncHandler(async (req, res) => {
-  const { name, title, body, screen, channel, imageUrl, category, variables } = req.body;
+  const { name, title, body, screen, url, channel, imageUrl, category, variables } = req.body;
   if (!name||!title||!body) throw ApiError.badRequest('name, title, body required');
   const tpl = await NotificationTemplate.create({
-    name, title, body, screen:screen||'Home', channel:channel||'default',
+    name, title, body, screen:screen||'Home', url, channel:channel||'default',
     imageUrl, category:category||'general', variables:variables||[],
     createdBy: req.user.id,
   });
@@ -249,7 +249,7 @@ const sendFromTemplate = asyncHandler(async (req, res) => {
     body  = body.replace(new RegExp(`{{${k}}}`,'g'), v);
   });
 
-  const payload = { title, body, data:{ screen: tpl.screen }, channel: tpl.channel, ...(tpl.imageUrl&&{imageUrl:tpl.imageUrl}) };
+  const payload = { title, body, data:{ screen: tpl.screen, ...(tpl.url&&{url: tpl.url}) }, channel: tpl.channel, ...(tpl.imageUrl&&{imageUrl:tpl.imageUrl}) };
   const result  = await doSend(audience||'all', payload, { userId, userIds, city, daysSince: daysSince&&Number(daysSince) });
 
   await NotificationTemplate.findByIdAndUpdate(templateId, { $inc: { useCount:1 } });
