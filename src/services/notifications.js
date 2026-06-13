@@ -77,6 +77,8 @@ async function sendPush(messages) {
     const chunks = [];
     for (let i = 0; i < expoMsgs.length; i += 100) chunks.push(expoMsgs.slice(i, i + 100));
 
+    const ticketMap = []; // { id, token }
+
     for (const chunk of chunks) {
       try {
         const { data } = await axios.post(EXPO_PUSH_URL, chunk, {
@@ -91,6 +93,10 @@ async function sendPush(messages) {
         (data?.data || []).forEach((r, i) => {
           if (r.status === 'error' && r.details?.error === 'DeviceNotRegistered') {
             staleTokens.push(chunk[i].to);
+          } else if (r.status === 'error') {
+            logger.error('[Push] Expo ticket error:', { token: chunk[i].to, ...r });
+          } else if (r.status === 'ok' && r.id) {
+            ticketMap.push({ id: r.id, token: chunk[i].to });
           }
         });
       } catch (err) {
@@ -132,6 +138,36 @@ async function sendPush(messages) {
         } else {
           logger.error('[Push] Expo chunk send failed:', err.response?.data || err.message || err);
         }
+      }
+    }
+    // ── Check delivery receipts (reveals credential/config errors) ──
+    if (ticketMap.length) {
+      try {
+        await new Promise((res) => setTimeout(res, 1500));
+        const ids = ticketMap.map((t) => t.id);
+        const idChunks = [];
+        for (let i = 0; i < ids.length; i += 1000) idChunks.push(ids.slice(i, i + 1000));
+        for (const idChunk of idChunks) {
+          const { data } = await axios.post('https://exp.host/--/api/v2/push/getReceipts', { ids: idChunk }, {
+            headers: {
+              Accept:            'application/json',
+              'Accept-Encoding': 'gzip, deflate',
+              'Content-Type':    'application/json',
+            },
+            timeout: 15_000,
+          });
+          const receipts = data?.data || {};
+          for (const id of idChunk) {
+            const r = receipts[id];
+            if (r && r.status === 'error') {
+              const token = ticketMap.find((t) => t.id === id)?.token;
+              logger.error('[Push] Expo receipt error:', { token, ...r });
+              if (r.details?.error === 'DeviceNotRegistered') staleTokens.push(token);
+            }
+          }
+        }
+      } catch (err) {
+        logger.error('[Push] Expo getReceipts failed:', err.response?.data || err.message || err);
       }
     }
   }
