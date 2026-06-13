@@ -94,7 +94,44 @@ async function sendPush(messages) {
           }
         });
       } catch (err) {
-        logger.error('[Push] Expo chunk send failed:', err.response?.data || err.message || err);
+        const apiErrors = err.response?.data?.errors;
+        const tooManyExp = apiErrors?.find((e) => e.code === 'PUSH_TOO_MANY_EXPERIENCE_IDS');
+        if (tooManyExp?.details) {
+          // Tokens span multiple Expo projects — split and retry per project.
+          const groups = tooManyExp.details;
+          const projectNames = Object.keys(groups);
+          // Keep only the current app's project (macawbeautyy); drop tokens from old/other projects.
+          const currentProject = projectNames.find((p) => p.includes('macawbeautyy')) || projectNames[0];
+          for (const projectName of projectNames) {
+            const tokensForProject = groups[projectName];
+            const subChunk = chunk.filter((m) => tokensForProject.includes(m.to));
+            if (projectName !== currentProject) {
+              // Stale tokens from a different/old Expo project — clean them up.
+              tokensForProject.forEach((t) => staleTokens.push(t));
+              continue;
+            }
+            try {
+              const { data } = await axios.post(EXPO_PUSH_URL, subChunk, {
+                headers: {
+                  Accept:            'application/json',
+                  'Accept-Encoding': 'gzip, deflate',
+                  'Content-Type':    'application/json',
+                },
+                timeout: 15_000,
+              });
+              totalSent += subChunk.length;
+              (data?.data || []).forEach((r, i) => {
+                if (r.status === 'error' && r.details?.error === 'DeviceNotRegistered') {
+                  staleTokens.push(subChunk[i].to);
+                }
+              });
+            } catch (err2) {
+              logger.error('[Push] Expo sub-chunk send failed:', err2.response?.data || err2.message || err2);
+            }
+          }
+        } else {
+          logger.error('[Push] Expo chunk send failed:', err.response?.data || err.message || err);
+        }
       }
     }
   }
