@@ -4,6 +4,7 @@ const ScheduledNotificationSchema = new mongoose.Schema({
   title:       { type: String, required: true },
   body:        { type: String, required: true },
   screen:      { type: String, default: 'Home' },
+  url:         { type: String },
   channel:     { type: String, default: 'default' },
   imageUrl:    { type: String },
   audience:    { type: String, required: true },

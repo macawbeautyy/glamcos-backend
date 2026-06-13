@@ -5,6 +5,7 @@ const NotificationTemplateSchema = new mongoose.Schema({
   title:       { type: String, required: true },
   body:        { type: String, required: true },
   screen:      { type: String, default: 'Home' },
+  url:         { type: String },
   channel:     { type: String, default: 'default' },
   imageUrl:    { type: String },
   category:    { type: String, default: 'general' }, // booking|payment|promo|re-engagement|general
