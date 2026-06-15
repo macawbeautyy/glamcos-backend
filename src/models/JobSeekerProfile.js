@@ -34,6 +34,21 @@ const JobSeekerProfileSchema = new mongoose.Schema({
     year:      String,
   }],
 
+  // Previous work experience
+  previousWork: [{
+    company:     { type: String, default: '' },
+    role:        { type: String, default: '' },
+    duration:    { type: String, default: '' },  // e.g. "Jan 2022 - Dec 2023"
+    description: { type: String, default: '' },
+  }],
+
+  // Accommodation needs (live-in stylists, out-of-town candidates etc.)
+  needsAccommodation: { type: Boolean, default: false },
+  accommodationNotes: { type: String, default: '' }, // e.g. "Need single room near salon"
+
+  // Gallery photos showcasing past work
+  galleryPhotos: [{ type: String }],
+
   // Admin approval — candidates are visible to employers only once approved
   status: {
     type: String,
@@ -61,8 +76,9 @@ JobSeekerProfileSchema.pre('save', function (next) {
   if (this.bio)         score += 10;
   if (this.skills?.length > 0)  score += 15;
   if (this.experience)  score += 10;
-  if (this.cvUrl)       score += 20;
+  if (this.cvUrl)       score += 15;
   if (this.currentCity) score += 10;
+  if (this.profilePhoto) score += 5;
   this.profileCompleteness = score;
   this.isProfileComplete   = score >= 70;
   next();

@@ -8,7 +8,7 @@ const CandidateContactSchema = new mongoose.Schema({
   employer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   seeker:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   seekerProfile: { type: mongoose.Schema.Types.ObjectId, ref: 'JobSeekerProfile' },
-  action:   { type: String, enum: ['unlock', 'hire'], default: 'unlock' },
+  action:   { type: String, enum: ['unlock', 'hire', 'reject', 'shortlist'], default: 'unlock' },
   planAtTime: { type: String, default: null },
 }, { timestamps: true });
 

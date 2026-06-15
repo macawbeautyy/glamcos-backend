@@ -87,15 +87,18 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     title, bio, skills, experience, currentCity,
     preferredJobTypes, expectedSalary, cvUrl, cvFilename,
     portfolioUrls, education,
+    previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
   } = req.body;
 
   if (!fullName) throw ApiError.badRequest('Full name is required');
+  if (!profilePhoto) throw ApiError.badRequest('A profile photo is required');
 
   const data = {
     user: uid, fullName, phone, dateOfBirth, gender, profilePhoto,
     title, bio, skills, experience, currentCity,
     preferredJobTypes, expectedSalary, cvUrl, cvFilename,
     portfolioUrls, education,
+    previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
   };
 
   const profile = await JobSeekerProfile.findOneAndUpdate(
@@ -212,7 +215,7 @@ const maskEmail = (e) => {
   return `${u.slice(0, 2)}••••@${d}`;
 };
 
-function presentCandidate(profile, { unlocked }) {
+function presentCandidate(profile, { unlocked, shortlisted }) {
   const o = profile.toObject ? profile.toObject() : profile;
   const userDoc = o.user && typeof o.user === 'object' ? o.user : null;
   const base = {
@@ -220,6 +223,7 @@ function presentCandidate(profile, { unlocked }) {
     userId: userDoc?._id || o.user,
     fullName: o.fullName,
     profilePhoto: o.profilePhoto || null,
+    galleryPhotos: o.galleryPhotos || [],
     title: o.title,
     bio: o.bio,
     skills: o.skills || [],
@@ -229,10 +233,14 @@ function presentCandidate(profile, { unlocked }) {
     preferredJobTypes: o.preferredJobTypes || [],
     expectedSalary: o.expectedSalary || null,
     education: o.education || [],
+    previousWork: o.previousWork || [],
+    needsAccommodation: Boolean(o.needsAccommodation),
+    accommodationNotes: o.accommodationNotes || '',
     portfolioUrls: o.portfolioUrls || [],
     profileCompleteness: o.profileCompleteness,
     memberSince: o.createdAt,
     unlocked: Boolean(unlocked),
+    shortlisted: Boolean(shortlisted),
   };
   if (unlocked) {
     base.phone = o.phone || userDoc?.phone || null;
@@ -263,13 +271,30 @@ const getCandidates = asyncHandler(async (req, res) => {
   const employer = await requireApprovedEmployer(req);
   const subscribed = hasActiveSubscription(employer);
 
-  const { search, city, skill, page = 1, limit = 20 } = req.query;
+  const { search, city, skill, page = 1, limit = 20, exclude, shortlistedOnly } = req.query;
   const filter = { status: 'approved' };
   if (city)  filter.currentCity = new RegExp(city, 'i');
   if (skill) filter.skills = new RegExp(skill, 'i');
   if (search) {
     const rx = new RegExp(search, 'i');
     filter.$or = [{ fullName: rx }, { title: rx }, { skills: rx }, { currentCity: rx }, { bio: rx }];
+  }
+
+  // Candidates this employer has already swiped on (reject OR accept/shortlist)
+  // are removed from the discovery deck so they don't reappear. Pass
+  // `exclude=false` (e.g. an "all candidates" view) to disable this.
+  // Pass `shortlistedOnly=true` to fetch only the employer's shortlist
+  // (so they can revisit + unlock after subscribing).
+  const myContacts = await CandidateContact.find({ employer: userId(req) }).select('seekerProfile action');
+  const rejectedSet   = new Set(myContacts.filter((c) => c.action === 'reject').map((c) => String(c.seekerProfile)));
+  const unlockedSet   = new Set(myContacts.filter((c) => c.action === 'unlock' || c.action === 'hire').map((c) => String(c.seekerProfile)));
+  const shortlistedSet= new Set(myContacts.filter((c) => c.action === 'shortlist').map((c) => String(c.seekerProfile)));
+
+  if (shortlistedOnly === 'true') {
+    filter._id = { $in: Array.from(shortlistedSet) };
+  } else if (exclude !== 'false') {
+    const seenSet = new Set([...rejectedSet, ...shortlistedSet]);
+    if (seenSet.size) filter._id = { $nin: Array.from(seenSet) };
   }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -282,14 +307,11 @@ const getCandidates = asyncHandler(async (req, res) => {
     JobSeekerProfile.countDocuments(filter),
   ]);
 
-  // Already-unlocked candidates stay unlocked for this employer
-  const unlockedSet = new Set(
-    (await CandidateContact.find({ employer: userId(req) }).select('seekerProfile'))
-      .map((c) => String(c.seekerProfile))
-  );
-
   const data = profiles.map((pr) =>
-    presentCandidate(pr, { unlocked: subscribed && unlockedSet.has(String(pr._id)) })
+    presentCandidate(pr, {
+      unlocked: subscribed && unlockedSet.has(String(pr._id)),
+      shortlisted: shortlistedSet.has(String(pr._id)),
+    })
   );
 
   return res.json({
@@ -297,6 +319,57 @@ const getCandidates = asyncHandler(async (req, res) => {
     data,
     total,
     meta: { subscribed, plan: employer.subscriptionPlan, expiresAt: employer.subscriptionExpiresAt },
+  });
+});
+
+/**
+ * Employer: swipe on a candidate card — 'reject' hides them from the deck
+ * permanently, 'accept' shortlists them (and unlocks contact details right
+ * away if the employer already holds an active subscription).
+ * @body { action: 'accept' | 'reject' }
+ */
+const swipeCandidate = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const subscribed = hasActiveSubscription(employer);
+
+  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
+    .populate('user', 'email phone');
+  if (!profile) throw ApiError.notFound('Candidate not found');
+
+  const action = req.body?.action === 'accept' ? 'accept' : 'reject';
+
+  if (action === 'reject') {
+    await CandidateContact.create({
+      employer: userId(req),
+      seeker: profile.user?._id || profile.user,
+      seekerProfile: profile._id,
+      action: 'reject',
+      planAtTime: employer.subscriptionPlan,
+    });
+    return ApiResponse.success(res, { data: { id: profile._id, status: 'rejected' }, message: 'Candidate passed' });
+  }
+
+  // accept → shortlist (+ auto-unlock if subscribed)
+  await CandidateContact.create({
+    employer: userId(req),
+    seeker: profile.user?._id || profile.user,
+    seekerProfile: profile._id,
+    action: 'shortlist',
+    planAtTime: employer.subscriptionPlan,
+  });
+  if (subscribed) {
+    await CandidateContact.create({
+      employer: userId(req),
+      seeker: profile.user?._id || profile.user,
+      seekerProfile: profile._id,
+      action: 'unlock',
+      planAtTime: employer.subscriptionPlan,
+    });
+  }
+
+  return ApiResponse.success(res, {
+    data: presentCandidate(profile, { unlocked: subscribed, shortlisted: true }),
+    message: subscribed ? 'Candidate shortlisted — contact unlocked' : 'Candidate shortlisted',
   });
 });
 
@@ -309,9 +382,11 @@ const getCandidateById = asyncHandler(async (req, res) => {
     .populate('user', 'email phone');
   if (!profile) throw ApiError.notFound('Candidate not found');
 
-  const already = await CandidateContact.findOne({ employer: userId(req), seekerProfile: profile._id });
+  const contacts = await CandidateContact.find({ employer: userId(req), seekerProfile: profile._id }).select('action');
+  const unlocked = subscribed && contacts.some((c) => c.action === 'unlock' || c.action === 'hire');
+  const shortlisted = contacts.some((c) => c.action === 'shortlist');
   return ApiResponse.success(res, {
-    data: presentCandidate(profile, { unlocked: subscribed && Boolean(already) }),
+    data: presentCandidate(profile, { unlocked, shortlisted }),
     message: 'Candidate',
   });
 });
@@ -653,6 +728,7 @@ module.exports = {
   getCandidates,
   getCandidateById,
   contactCandidate,
+  swipeCandidate,
   getMyCandidateContacts,
   adminReviewSeeker,
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,

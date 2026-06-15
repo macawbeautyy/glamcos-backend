@@ -11,6 +11,7 @@ const {
   getCandidates,
   getCandidateById,
   contactCandidate,
+  swipeCandidate,
   getMyCandidateContacts,
   adminReviewSeeker,
   createSubscriptionOrder,
@@ -34,6 +35,7 @@ router.get('/candidates',            protect, getCandidates);
 router.get('/candidates/contacts',   protect, getMyCandidateContacts);
 router.get('/candidates/:id',        protect, getCandidateById);
 router.post('/candidates/:id/contact', protect, contactCandidate);
+router.post('/candidates/:id/swipe',   protect, swipeCandidate);
 
 router.get('/plans',                 getPlans);
 router.post('/subscribe',            protect, subscribeToPlan);
