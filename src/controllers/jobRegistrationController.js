@@ -98,7 +98,7 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     languages, preferredJobTypes, workMode, expectedSalary, cvUrl, cvFilename,
     portfolioPhotos: portfolioPhotos || portfolioUrls, // accept both names
     education,
-    previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
+    previousWork, needsAccommodation, accommodationNotes, galleryPhotos, isPublished,
   };
 
   const profile = await JobSeekerProfile.findOneAndUpdate(
@@ -277,7 +277,7 @@ const getCandidates = asyncHandler(async (req, res) => {
   const subscribed = hasActiveSubscription(employer);
 
   const { search, city, skill, page = 1, limit = 20, exclude, shortlistedOnly } = req.query;
-  const filter = { status: 'approved' };
+  const filter = { status: 'approved', isPublished: true };
   if (city)  filter.currentCity = new RegExp(city, 'i');
   if (skill) filter.skills = new RegExp(skill, 'i');
   if (search) {

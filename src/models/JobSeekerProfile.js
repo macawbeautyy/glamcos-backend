@@ -62,6 +62,9 @@ const JobSeekerProfileSchema = new mongoose.Schema({
   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   reviewedAt: { type: Date },
 
+  // Candidate-controlled visibility — set to true via Publish Profile button
+  isPublished: { type: Boolean, default: false },
+
   // Profile completeness tracking
   isProfileComplete: { type: Boolean, default: false },
   profileCompleteness: { type: Number, default: 0 }, // 0-100
