@@ -11,21 +11,23 @@ const JobSeekerProfileSchema = new mongoose.Schema({
   profilePhoto:{ type: String, default: '' }, // URL
 
   // Professional info
-  title:       { type: String, default: '' },  // e.g. "Senior Hair Stylist"
-  bio:         { type: String, default: '' },
-  skills:      [{ type: String, trim: true }],
-  experience:  { type: String, default: '' },  // e.g. "3 years"
-  currentCity: { type: String, default: '' },
-  preferredJobTypes: [{ type: String }],        // ['full_time', 'part_time']
-  expectedSalary: {
-    min: { type: Number, default: 0 },
-    max: { type: Number, default: 0 },
-  },
+  title:           { type: String, default: '' },  // e.g. "Senior Hair Stylist"
+  bio:             { type: String, default: '' },
+  specializations: [{ type: String, trim: true }], // e.g. ['hair_stylist', 'makeup_artist']
+  skills:          [{ type: String, trim: true }],
+  certifications:  [{ type: String, trim: true }], // e.g. ['VLCC', 'Lakme Academy']
+  experience:      { type: String, default: '' },  // e.g. "3–4 years"
+  currentCity:     { type: String, default: '' },
+  languages:       [{ type: String }],             // ['Hindi', 'English']
+  preferredJobTypes: [{ type: String }],           // ['full_time', 'part_time']
+  workMode:        { type: String, enum: ['on_site', 'home_service', 'both', ''], default: '' },
+  expectedSalary:  { min: { type: Number, default: 0 }, max: { type: Number, default: 0 } },
 
   // CV / Portfolio
-  cvUrl:        { type: String, default: '' },   // uploaded PDF URL
-  cvFilename:   { type: String, default: '' },
-  portfolioUrls:[{ type: String }],
+  cvUrl:           { type: String, default: '' },
+  cvFilename:      { type: String, default: '' },
+  portfolioPhotos: [{ type: String }],  // renamed from portfolioUrls for clarity
+  portfolioUrls:   [{ type: String }],  // legacy — kept for backward compatibility
 
   // Education
   education: [{
@@ -70,15 +72,18 @@ JobSeekerProfileSchema.index({ user: 1 });
 // Calculate completeness before save
 JobSeekerProfileSchema.pre('save', function (next) {
   let score = 0;
-  if (this.fullName)    score += 15;
-  if (this.phone)       score += 10;
-  if (this.title)       score += 10;
-  if (this.bio)         score += 10;
-  if (this.skills?.length > 0)  score += 15;
-  if (this.experience)  score += 10;
-  if (this.cvUrl)       score += 15;
-  if (this.currentCity) score += 10;
-  if (this.profilePhoto) score += 5;
+  if (this.fullName)                    score += 10;
+  if (this.phone)                       score += 5;
+  if (this.profilePhoto)                score += 10;
+  if (this.bio)                         score += 5;
+  if (this.specializations?.length > 0) score += 10;
+  if (this.skills?.length > 0)          score += 15;
+  if (this.certifications?.length > 0)  score += 10;
+  if (this.experience)                  score += 10;
+  if (this.currentCity)                 score += 5;
+  if (this.portfolioPhotos?.length > 0) score += 10;
+  if (this.previousWork?.length > 0)    score += 5;
+  if (this.cvUrl)                       score += 5;
   this.profileCompleteness = score;
   this.isProfileComplete   = score >= 70;
   next();

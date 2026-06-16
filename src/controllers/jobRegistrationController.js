@@ -83,10 +83,10 @@ const updateEmployerProfile = asyncHandler(async (req, res) => {
 const upsertSeekerProfile = asyncHandler(async (req, res) => {
   const uid = userId(req);
   const {
-    fullName, phone, dateOfBirth, gender, profilePhoto,
-    title, bio, skills, experience, currentCity,
-    preferredJobTypes, expectedSalary, cvUrl, cvFilename,
-    portfolioUrls, education,
+    fullName, phone, email, dateOfBirth, gender, profilePhoto,
+    title, bio, specializations, skills, certifications, experience, currentCity,
+    languages, preferredJobTypes, workMode, expectedSalary, cvUrl, cvFilename,
+    portfolioPhotos, portfolioUrls, education,
     previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
   } = req.body;
 
@@ -94,10 +94,11 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
   if (!profilePhoto) throw ApiError.badRequest('A profile photo is required');
 
   const data = {
-    user: uid, fullName, phone, dateOfBirth, gender, profilePhoto,
-    title, bio, skills, experience, currentCity,
-    preferredJobTypes, expectedSalary, cvUrl, cvFilename,
-    portfolioUrls, education,
+    user: uid, fullName, phone, email, dateOfBirth, gender, profilePhoto,
+    title, bio, specializations, skills, certifications, experience, currentCity,
+    languages, preferredJobTypes, workMode, expectedSalary, cvUrl, cvFilename,
+    portfolioPhotos: portfolioPhotos || portfolioUrls, // accept both names
+    education,
     previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
   };
 
@@ -280,13 +281,19 @@ const getCandidates = asyncHandler(async (req, res) => {
     filter.$or = [{ fullName: rx }, { title: rx }, { skills: rx }, { currentCity: rx }, { bio: rx }];
   }
 
-  // Candidates this employer has already swiped on (reject OR accept/shortlist)
-  // are removed from the discovery deck so they don't reappear. Pass
-  // `exclude=false` (e.g. an "all candidates" view) to disable this.
-  // Pass `shortlistedOnly=true` to fetch only the employer's shortlist
-  // (so they can revisit + unlock after subscribing).
-  const myContacts = await CandidateContact.find({ employer: userId(req) }).select('seekerProfile action');
-  const rejectedSet   = new Set(myContacts.filter((c) => c.action === 'reject').map((c) => String(c.seekerProfile)));
+  // Candidates this employer has already swiped on (accept/shortlist) are
+  // permanently hidden (they're in shortlist). REJECTED candidates are hidden
+  // for REJECT_COOLDOWN_MS (24 h) then automatically reappear — so employers
+  // don't exhaust their candidate pool after one swipe session.
+  // Pass `exclude=false` to show all; `shortlistedOnly=true` for shortlist view.
+  const REJECT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const cooldownCutoff = new Date(Date.now() - REJECT_COOLDOWN_MS);
+  const myContacts = await CandidateContact.find({ employer: userId(req) }).select('seekerProfile action createdAt');
+  // Only exclude recently-rejected candidates (within cooldown window)
+  const rejectedSet   = new Set(
+    myContacts.filter((c) => c.action === 'reject' && new Date(c.createdAt) > cooldownCutoff)
+      .map((c) => String(c.seekerProfile))
+  );
   const unlockedSet   = new Set(myContacts.filter((c) => c.action === 'unlock' || c.action === 'hire').map((c) => String(c.seekerProfile)));
   const shortlistedSet= new Set(myContacts.filter((c) => c.action === 'shortlist').map((c) => String(c.seekerProfile)));
 
