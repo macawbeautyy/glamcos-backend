@@ -31,6 +31,9 @@ const EmployerProfileSchema = new mongoose.Schema({
   subscriptionPaidAt:    { type: Date },
   subscriptionAmount:    { type: Number, default: 0 },
 
+  // Prepaid unlock credits (buy bundles, deduct per unlock)
+  unlockCredits: { type: Number, default: 0 },
+
   // Usage tracking
   activeListings: { type: Number, default: 0 },
   totalListings:  { type: Number, default: 0 },

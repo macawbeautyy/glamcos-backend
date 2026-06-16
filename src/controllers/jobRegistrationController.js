@@ -91,7 +91,6 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
   } = req.body;
 
   if (!fullName) throw ApiError.badRequest('Full name is required');
-  if (!profilePhoto) throw ApiError.badRequest('A profile photo is required');
 
   const data = {
     user: uid, fullName, phone, email, dateOfBirth, gender, profilePhoto,
@@ -436,13 +435,17 @@ const contactCandidate = asyncHandler(async (req, res) => {
 });
 
 /**
- * Employer: create a Razorpay order to unlock one candidate's contact details for ₹499.
+ * Employer: unlock one candidate's contact details.
+ * If the employer has prepaid unlock credits, deduct one and return the
+ * candidate data immediately (no Razorpay needed).
+ * Otherwise create a Razorpay order for ₹499 and return the order details.
  * @route POST /api/v1/job-registration/candidates/:id/unlock/order
  */
 const createUnlockOrder = asyncHandler(async (req, res) => {
   const employer = await requireApprovedEmployer(req);
 
-  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' });
+  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
+    .populate('user', 'email phone');
   if (!profile) throw ApiError.notFound('Candidate not found');
 
   // Already unlocked?
@@ -453,6 +456,31 @@ const createUnlockOrder = asyncHandler(async (req, res) => {
   });
   if (existing) throw ApiError.badRequest('You have already unlocked this candidate');
 
+  // ── Use a prepaid credit if available ────────────────────────────────────
+  if (employer.unlockCredits > 0) {
+    employer.unlockCredits -= 1;
+    await employer.save();
+
+    await CandidateContact.create({
+      employer: userId(req),
+      seeker: profile.user?._id || profile.user,
+      seekerProfile: profile._id,
+      action: 'unlock',
+      planAtTime: 'credit',
+      paidAmount: 0, // paid at bundle purchase time
+    });
+
+    return ApiResponse.success(res, {
+      data: {
+        creditUsed: true,
+        creditsRemaining: employer.unlockCredits,
+        candidate: presentCandidate(profile, { unlocked: true, shortlisted: false }),
+      },
+      message: `1 credit used — contact unlocked. ${employer.unlockCredits} credit(s) remaining.`,
+    });
+  }
+
+  // ── No credits — create Razorpay order ───────────────────────────────────
   const client = getRazorpayClient();
   const UNLOCK_PRICE = 49900; // ₹499 in paise
   const rzpOrder = await client.orders.create({
@@ -619,6 +647,81 @@ const verifySubscriptionPayment = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, {
     data: { plan: plan.planKey, expiresAt, paymentId: razorpayPaymentId },
     message: `${plan.name} plan activated`,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  UNLOCK CREDIT BUNDLES
+// ══════════════════════════════════════════════════════════════════════════════
+
+const BUNDLE_OPTIONS = {
+  1:  { paise: 49900,  label: '1 Unlock Credit'  },
+  5:  { paise: 200000, label: '5 Unlock Credits' },
+  10: { paise: 350000, label: '10 Unlock Credits' },
+};
+
+/**
+ * Create a Razorpay order to purchase an unlock credit bundle.
+ * @route POST /api/v1/job-registration/credits/order
+ * @body  { qty: 1 | 5 | 10 }
+ */
+const createBundleOrder = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const qty = parseInt(req.body?.qty);
+  const bundle = BUNDLE_OPTIONS[qty];
+  if (!bundle) throw ApiError.badRequest('qty must be 1, 5, or 10');
+
+  const client = getRazorpayClient();
+  const rzpOrder = await client.orders.create({
+    amount: bundle.paise,
+    currency: 'INR',
+    receipt: `BUNDLE${qty}-${Date.now().toString(36).toUpperCase()}`,
+    notes: { type: 'unlock_bundle', qty: String(qty), employerId: userId(req) },
+  });
+
+  return ApiResponse.success(res, {
+    data: {
+      razorpayOrderId: rzpOrder.id,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency,
+      keyId: process.env.RAZORPAY_KEY_ID,
+      qty,
+      label: bundle.label,
+    },
+    message: `Bundle order created — pay to receive ${qty} unlock credit(s)`,
+  });
+});
+
+/**
+ * Verify bundle payment and credit the employer's account.
+ * @route POST /api/v1/job-registration/credits/verify
+ * @body  { qty, razorpayOrderId, razorpayPaymentId, razorpaySignature }
+ */
+const verifyBundlePayment = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const { qty: rawQty, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  const qty = parseInt(rawQty);
+
+  if (!BUNDLE_OPTIONS[qty] || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    throw ApiError.badRequest('qty, razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
+  }
+
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
+
+  const expected = crypto
+    .createHmac('sha256', keySecret)
+    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+    .digest('hex');
+  if (expected !== razorpaySignature) throw ApiError.badRequest('Payment verification failed — signature mismatch');
+
+  // Add credits to employer wallet
+  employer.unlockCredits = (employer.unlockCredits || 0) + qty;
+  await employer.save();
+
+  return ApiResponse.success(res, {
+    data: { unlockCredits: employer.unlockCredits, qty, paymentId: razorpayPaymentId },
+    message: `${qty} unlock credit(s) added to your account`,
   });
 });
 
@@ -830,6 +933,8 @@ const adminReviewSeeker = asyncHandler(async (req, res) => {
 module.exports = {
   createSubscriptionOrder,
   verifySubscriptionPayment,
+  createBundleOrder,
+  verifyBundlePayment,
   adminCreateSeeker,
   adminDeleteSeeker,
   getCandidates,

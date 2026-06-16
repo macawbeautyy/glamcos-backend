@@ -14,6 +14,8 @@ const {
   getJobApplications,
   getAllApplications,
   updateApplicationStatus,
+  createJobApplicantUnlockOrder,
+  verifyJobApplicantUnlockPayment,
 } = require('../controllers/jobController');
 
 // ── IMPORTANT: Specific static routes must come BEFORE /:id wildcard routes ──
@@ -39,5 +41,7 @@ router.patch('/:id', protect, updateJob);
 router.delete('/:id', protect, deleteJob);
 router.post('/:id/boost', protect, boostJob);
 router.get('/:id/applications', protect, getJobApplications);
+router.post('/:id/applications/:applicationId/unlock/order',  protect, createJobApplicantUnlockOrder);
+router.post('/:id/applications/:applicationId/unlock/verify', protect, verifyJobApplicantUnlockPayment);
 
 module.exports = router;
