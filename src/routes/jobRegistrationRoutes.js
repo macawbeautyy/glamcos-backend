@@ -11,6 +11,8 @@ const {
   getCandidates,
   getCandidateById,
   contactCandidate,
+  createUnlockOrder,
+  verifyUnlockPayment,
   swipeCandidate,
   getMyCandidateContacts,
   adminReviewSeeker,
@@ -34,8 +36,10 @@ router.get('/seeker/me',             protect, getMySeekerProfile);
 router.get('/candidates',            protect, getCandidates);
 router.get('/candidates/contacts',   protect, getMyCandidateContacts);
 router.get('/candidates/:id',        protect, getCandidateById);
-router.post('/candidates/:id/contact', protect, contactCandidate);
-router.post('/candidates/:id/swipe',   protect, swipeCandidate);
+router.post('/candidates/:id/contact',       protect, contactCandidate);
+router.post('/candidates/:id/unlock/order',  protect, createUnlockOrder);
+router.post('/candidates/:id/unlock/verify', protect, verifyUnlockPayment);
+router.post('/candidates/:id/swipe',         protect, swipeCandidate);
 
 router.get('/plans',                 getPlans);
 router.post('/subscribe',            protect, subscribeToPlan);
