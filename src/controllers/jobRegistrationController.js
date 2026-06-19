@@ -98,7 +98,8 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     languages, preferredJobTypes, workMode, expectedSalary, cvUrl, cvFilename,
     portfolioPhotos: portfolioPhotos || portfolioUrls, // accept both names
     education,
-    previousWork, needsAccommodation, accommodationNotes, galleryPhotos, isPublished,
+    previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
+    isPublished: true, // auto-publish — profiles go live immediately
   };
 
   const profile = await JobSeekerProfile.findOneAndUpdate(
@@ -277,7 +278,9 @@ const getCandidates = asyncHandler(async (req, res) => {
   const subscribed = hasActiveSubscription(employer);
 
   const { search, city, skill, page = 1, limit = 20, exclude, shortlistedOnly } = req.query;
-  const filter = { status: 'approved', isPublished: true };
+  // Show every approved candidate. (isPublished is no longer a hard gate so
+  // existing/admin-added profiles are visible; an explicit false hides one.)
+  const filter = { status: 'approved' };
   if (city)  filter.currentCity = new RegExp(city, 'i');
   if (skill) filter.skills = new RegExp(skill, 'i');
   if (search) {
@@ -764,6 +767,7 @@ const adminCreateSeeker = asyncHandler(async (req, res) => {
     cvUrl: (cvUrl || '').trim(),
     preferredJobTypes: preferredJobTypes || [],
     status: 'approved',          // admin-added → instantly visible to employers
+    isPublished: true,
     reviewedBy: userId(req),
     reviewedAt: new Date(),
   });
@@ -917,6 +921,7 @@ const adminReviewSeeker = asyncHandler(async (req, res) => {
 
   if (action === 'approve') {
     profile.status = 'approved';
+    profile.isPublished = true;
   } else if (action === 'reject') {
     profile.status = 'rejected';
     profile.rejectionReason = reason || 'Profile not approved';
