@@ -87,7 +87,7 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     title, bio, specializations, skills, certifications, experience, currentCity,
     languages, preferredJobTypes, workMode, expectedSalary, cvUrl, cvFilename,
     portfolioPhotos, portfolioUrls, education,
-    previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
+    previousWork, needsAccommodation, accommodationNotes, galleryPhotos, isPublished,
   } = req.body;
 
   if (!fullName) throw ApiError.badRequest('Full name is required');
@@ -99,8 +99,9 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     portfolioPhotos: portfolioPhotos || portfolioUrls, // accept both names
     education,
     previousWork, needsAccommodation, accommodationNotes, galleryPhotos,
-    isPublished: true, // auto-publish — profiles go live immediately
   };
+  // Respect the publish flag the client sends (Publish / save-as-draft).
+  if (typeof isPublished === 'boolean') data.isPublished = isPublished;
 
   const profile = await JobSeekerProfile.findOneAndUpdate(
     { user: uid },
@@ -278,9 +279,8 @@ const getCandidates = asyncHandler(async (req, res) => {
   const subscribed = hasActiveSubscription(employer);
 
   const { search, city, skill, page = 1, limit = 20, exclude, shortlistedOnly } = req.query;
-  // Show every approved candidate. (isPublished is no longer a hard gate so
-  // existing/admin-added profiles are visible; an explicit false hides one.)
-  const filter = { status: 'approved' };
+  // Employers see approved candidates that the candidate has PUBLISHED.
+  const filter = { status: 'approved', isPublished: true };
   if (city)  filter.currentCity = new RegExp(city, 'i');
   if (skill) filter.skills = new RegExp(skill, 'i');
   if (search) {
