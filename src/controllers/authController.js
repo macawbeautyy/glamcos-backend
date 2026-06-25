@@ -117,12 +117,16 @@ const firebaseLogin = asyncHandler(async (req, res) => {
     }
   }
 
-  // Find existing user by firebaseUid, email, or phone
+  // fallbackEmail is used both in lookup and creation so repeat sign-ins always find the same user
+  const fallbackEmail = `${uid}@firebase.user`;
+
+  // Find existing user by firebaseUid, email, phone, or the fallback email
   let user = await User.findOne({
     $or: [
       { firebaseUid: uid },
-      ...(email        ? [{ email }]        : []),
+      ...(email        ? [{ email }]              : []),
       ...(phone_number ? [{ phone: phone_number }] : []),
+      { email: fallbackEmail },
     ],
   });
 
@@ -149,7 +153,7 @@ const firebaseLogin = asyncHandler(async (req, res) => {
       firebaseUid:  uid,
       firstName,
       lastName,
-      email:        email           || `${uid}@firebase.user`,
+      email:        email           || fallbackEmail,
       phone:        phone_number    || undefined,   // undefined = field omitted entirely, sparse index ignores it
       avatar:       picture         || '',
       authProvider: email ? 'google' : 'phone',
