@@ -6,6 +6,12 @@ const config = require('../config/env');
 const UserSchema = new mongoose.Schema(
   {
     // --- Identity ---
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
     firstName: {
       type: String,
       required: [true, 'First name is required'],

@@ -102,7 +102,20 @@ const firebaseLogin = asyncHandler(async (req, res) => {
     throw ApiError.unauthorized('Invalid or expired Firebase token');
   }
 
-  const { uid, email, name, picture, phone_number } = decoded;
+  let { uid, email, name, picture, phone_number } = decoded;
+
+  // Apple Sign-In often omits email from token claims — fetch from Firebase user record
+  if (!email) {
+    try {
+      const admin = require('../config/firebase');
+      const firebaseUser = await admin.auth().getUser(uid);
+      email   = firebaseUser.email   || email;
+      name    = firebaseUser.displayName || name;
+      picture = firebaseUser.photoURL    || picture;
+    } catch (e) {
+      console.warn('[firebaseLogin] getUser fallback failed:', e.message);
+    }
+  }
 
   // Find existing user by firebaseUid, email, or phone
   let user = await User.findOne({
