@@ -20,10 +20,9 @@ const MODEL_MAP = {
   salonAppointments: () => require('../models/SalonAppointment'),
   carts:             () => require('../models/Cart'),
   reviews:           () => require('../models/Review'),
-  jobs:              () => require('../models/Job'),
-  jobSeekers:        () => require('../models/JobSeekerProfile'),
-  jobEmployers:      () => require('../models/EmployerProfile'),
-  candidateContacts: () => require('../models/CandidateContact'),
+  // Job-related collections REMOVED from the purge map (2026-07-18) after an
+  // accidental one-click wipe of live job data from the admin panel. If a bulk
+  // job-data purge is ever truly needed, do it deliberately via a DB shell.
 };
 
 router.post('/purge', protect, authorize('superadmin'), async (req, res) => {

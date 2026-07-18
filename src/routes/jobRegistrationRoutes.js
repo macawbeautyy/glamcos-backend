@@ -7,6 +7,7 @@ const {
   getPlans, subscribeToPlan,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
+  adminEditJob, adminDeleteJob, adminEditSeeker,
   adminUpdatePlan, adminGetSeekers,
   getCandidates,
   getCandidateById,
@@ -57,10 +58,13 @@ router.get('/admin/employers',       protect, authorize('admin', 'superadmin'), 
 router.patch('/admin/employers/:id', protect, authorize('admin', 'superadmin'), adminReviewEmployer);
 router.get('/admin/jobs',            protect, authorize('admin', 'superadmin'), adminGetPendingJobs);
 router.patch('/admin/jobs/:id',      protect, authorize('admin', 'superadmin'), adminReviewJob);
+router.put('/admin/jobs/:id',        protect, authorize('admin', 'superadmin'), adminEditJob);
+router.delete('/admin/jobs/:id',     protect, authorize('admin', 'superadmin'), adminDeleteJob);
 router.patch('/admin/plans/:planKey',protect, authorize('admin', 'superadmin'), adminUpdatePlan);
 router.get('/admin/seekers',         protect, authorize('admin', 'superadmin'), adminGetSeekers);
 router.post('/admin/seekers',        protect, authorize('admin', 'superadmin'), adminCreateSeeker);
 router.delete('/admin/seekers/:id',  protect, authorize('admin', 'superadmin'), adminDeleteSeeker);
 router.patch('/admin/seekers/:id',   protect, authorize('admin', 'superadmin'), adminReviewSeeker);
+router.put('/admin/seekers/:id',     protect, authorize('admin', 'superadmin'), adminEditSeeker);
 
 module.exports = router;

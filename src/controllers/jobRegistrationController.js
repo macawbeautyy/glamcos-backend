@@ -917,6 +917,80 @@ const adminReviewJob = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: job, message: `Job listing ${action}d` });
 });
 
+/** Admin: edit a specific job listing's fields */
+const adminEditJob = asyncHandler(async (req, res) => {
+  const job = await Job.findById(req.params.id);
+  if (!job) throw ApiError.notFound('Job not found');
+
+  const simple = ['title', 'companyName', 'description', 'jobType', 'category',
+                  'experience', 'contactEmail', 'isFeatured', 'isUrgent', 'isActive'];
+  simple.forEach((k) => { if (req.body[k] !== undefined) job[k] = req.body[k]; });
+
+  if (req.body.openings !== undefined) job.openings = parseInt(req.body.openings) || 1;
+  if (req.body.skills !== undefined) {
+    job.skills = Array.isArray(req.body.skills)
+      ? req.body.skills
+      : String(req.body.skills).split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  if (req.body.location !== undefined) {
+    job.location = { ...job.location?.toObject?.() ?? job.location, ...req.body.location };
+  }
+  if (req.body.salary !== undefined) {
+    job.salary = { ...(job.salary?.toObject?.() ?? job.salary), ...req.body.salary };
+  }
+  if (req.body.deadline !== undefined) {
+    const d = new Date(req.body.deadline);
+    job.deadline = req.body.deadline && !isNaN(d.getTime()) ? d : undefined;
+  }
+
+  await job.save();
+  return ApiResponse.success(res, { data: job, message: 'Job updated' });
+});
+
+/** Admin: permanently delete a specific job listing */
+const adminDeleteJob = asyncHandler(async (req, res) => {
+  const job = await Job.findById(req.params.id);
+  if (!job) throw ApiError.notFound('Job not found');
+
+  // Release the employer's activeListings slot if the job was counting against it
+  if (job.postedBy && ['pending_review', 'approved'].includes(job.adminStatus)) {
+    await EmployerProfile.findOneAndUpdate(
+      { user: job.postedBy },
+      { $inc: { activeListings: -1 } }
+    );
+  }
+
+  await Job.findByIdAndDelete(req.params.id);
+  return ApiResponse.success(res, { data: { id: req.params.id }, message: 'Job deleted' });
+});
+
+/** Admin: edit a specific candidate profile's fields */
+const adminEditSeeker = asyncHandler(async (req, res) => {
+  const profile = await JobSeekerProfile.findById(req.params.id);
+  if (!profile) throw ApiError.notFound('Candidate profile not found');
+
+  const simple = ['fullName', 'phone', 'email', 'currentCity', 'title', 'bio',
+                  'gender', 'experience', 'cvUrl', 'workMode', 'isPublished'];
+  simple.forEach((k) => { if (req.body[k] !== undefined) profile[k] = req.body[k]; });
+
+  ['skills', 'certifications', 'specializations', 'languages', 'preferredJobTypes'].forEach((k) => {
+    if (req.body[k] !== undefined) {
+      profile[k] = Array.isArray(req.body[k])
+        ? req.body[k]
+        : String(req.body[k]).split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  });
+  if (req.body.expectedSalary !== undefined) {
+    profile.expectedSalary = {
+      min: Number(req.body.expectedSalary?.min) || 0,
+      max: Number(req.body.expectedSalary?.max) || 0,
+    };
+  }
+
+  await profile.save();
+  return ApiResponse.success(res, { data: profile, message: 'Candidate profile updated' });
+});
+
 /** Admin: update subscription plan config */
 const adminUpdatePlan = asyncHandler(async (req, res) => {
   const { planKey } = req.params;
@@ -984,5 +1058,6 @@ module.exports = {
   getPlans, subscribeToPlan,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
+  adminEditJob, adminDeleteJob, adminEditSeeker,
   adminUpdatePlan, adminGetSeekers,
 };
