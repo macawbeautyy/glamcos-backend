@@ -40,6 +40,10 @@ const CATEGORY_MAP = {
   'Spa':        'spa_therapist',
   'Management': 'salon_manager',
   'Fitness':    'fitness_trainer',
+  // No dedicated enum values for these — they land in 'other', which is
+  // browsable via the "Other" filter chip in the app.
+  'Skin':       'other',
+  'Grooming':   'other',
 };
 
 function parseJobType(val) {
@@ -174,7 +178,13 @@ const postJob = asyncHandler(async (req, res) => {
     experience:   experience || '',
     skills:       skillArr,
     openings:     parseInt(openings) || 1,
-    deadline:     deadline ? new Date(deadline) : undefined,
+    // Guard against free-text deadlines like "asap" — Invalid Date would
+    // throw a Mongoose cast error and fail the whole post.
+    deadline:     (() => {
+      if (!deadline) return undefined;
+      const d = new Date(deadline);
+      return isNaN(d.getTime()) ? undefined : d;
+    })(),
     contactEmail: contactEmail || '',
     isUrgent:     isUrgent  || false,
     isFeatured:   isFeatured || false,
@@ -230,12 +240,19 @@ const deleteJob = asyncHandler(async (req, res) => {
 
 // ── Boost (mark as featured) ───────────────────────────────────────────────────
 const boostJob = asyncHandler(async (req, res) => {
-  const job = await Job.findByIdAndUpdate(
-    req.params.id,
-    { isFeatured: true, isUrgent: true },
-    { new: true }
-  );
+  const job = await Job.findById(req.params.id);
   if (!job) throw ApiError.notFound('Job not found');
+
+  // Only the job owner or an admin may boost a listing
+  const userId = req.user?._id?.toString() || req.user?.id;
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  if (job.postedBy?.toString() !== userId && !isAdmin) {
+    throw ApiError.forbidden('Not authorized to boost this job');
+  }
+
+  job.isFeatured = true;
+  job.isUrgent   = true;
+  await job.save();
   return ApiResponse.success(res, { data: job, message: 'Job boosted' });
 });
 
@@ -372,6 +389,20 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
 
   const job = await Job.findOne({ 'applications._id': applicationId });
   if (!job) throw ApiError.notFound('Application not found');
+
+  // Only the employer who posted the job (or an admin) may change an
+  // application's status — otherwise any logged-in user could tamper
+  // with other employers' applicants.
+  const userId  = req.user?._id?.toString() || req.user?.id;
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  if (job.postedBy?.toString() !== userId && !isAdmin) {
+    throw ApiError.forbidden('Not authorized to update this application');
+  }
+
+  const ALLOWED_STATUSES = ['applied', 'shortlisted', 'rejected', 'hired'];
+  if (!ALLOWED_STATUSES.includes(status)) {
+    throw ApiError.badRequest(`status must be one of: ${ALLOWED_STATUSES.join(', ')}`);
+  }
 
   const app = job.applications.id(applicationId);
   app.status    = status;

@@ -86,7 +86,10 @@ const login = asyncHandler(async (req, res) => {
  * @access  Public
  */
 const firebaseLogin = asyncHandler(async (req, res) => {
-  const { idToken } = req.body;
+  // clientName/clientProvider come from the app itself — used for Apple Sign-In,
+  // where Apple only ever hands the real name to the client (once, on first
+  // authorization) and never propagates it into the Firebase token/claims.
+  const { idToken, name: clientName, provider: clientProvider } = req.body;
 
   if (!idToken) {
     throw ApiError.badRequest('Firebase ID token is required');
@@ -144,8 +147,10 @@ const firebaseLogin = asyncHandler(async (req, res) => {
     await user.save({ validateBeforeSave: false });
   } else {
     // Create new user from Firebase data
-    // Google accounts sometimes only provide a single display name with no last name
-    const nameParts = (name || 'User').trim().split(/\s+/);
+    // Google accounts sometimes only provide a single display name with no last name.
+    // Prefer the client-supplied name (Apple Sign-In's one-time fullName) over the
+    // Firebase token's name/displayName, which Apple sign-ins usually leave empty.
+    const nameParts = (clientName || name || 'User').trim().split(/\s+/);
     const firstName = nameParts[0] || 'User';
     const lastName  = nameParts.slice(1).join(' ') || '';
 
@@ -156,7 +161,7 @@ const firebaseLogin = asyncHandler(async (req, res) => {
       email:        email           || fallbackEmail,
       phone:        phone_number    || undefined,   // undefined = field omitted entirely, sparse index ignores it
       avatar:       picture         || '',
-      authProvider: email ? 'google' : 'phone',
+      authProvider: clientProvider || (email ? 'google' : 'phone'),
       role:         'user',
       status:       'active',
       isVerified:   true,

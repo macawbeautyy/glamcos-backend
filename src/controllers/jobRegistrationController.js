@@ -31,15 +31,35 @@ const userId = (req) => req.user?._id?.toString() || req.user?.id;
 const registerEmployer = asyncHandler(async (req, res) => {
   const uid = userId(req);
   const existing = await EmployerProfile.findOne({ user: uid });
-  if (existing) {
-    // Return existing profile
-    return ApiResponse.success(res, { data: existing, message: 'Profile already exists' });
-  }
 
   const {
     businessName, businessType, phone, email, website,
     gstNumber, address, description,
   } = req.body;
+
+  if (existing) {
+    // Rejected employers may RE-APPLY: update their profile with the new
+    // details and put them back in the review queue. Without this, the
+    // "Re-apply" button in the app was a dead end (profile already existed,
+    // so re-registration was silently ignored and status stayed 'rejected').
+    if (existing.status === 'rejected') {
+      if (!businessName) throw ApiError.badRequest('Business name is required');
+      existing.businessName    = businessName;
+      if (businessType !== undefined) existing.businessType = businessType;
+      if (phone        !== undefined) existing.phone        = phone;
+      if (email        !== undefined) existing.email        = email;
+      if (website      !== undefined) existing.website      = website;
+      if (gstNumber    !== undefined) existing.gstNumber    = gstNumber;
+      if (address      !== undefined) existing.address      = address;
+      if (description  !== undefined) existing.description  = description;
+      existing.status          = 'pending';
+      existing.rejectionReason = '';
+      await existing.save();
+      return ApiResponse.success(res, { data: existing, message: 'Re-application submitted. Awaiting admin approval.' });
+    }
+    // Pending / approved — return existing profile unchanged
+    return ApiResponse.success(res, { data: existing, message: 'Profile already exists' });
+  }
 
   if (!businessName) throw ApiError.badRequest('Business name is required');
 
@@ -868,6 +888,15 @@ const adminReviewJob = asyncHandler(async (req, res) => {
   if (action === 'approve') {
     job.adminStatus = 'approved';
     job.isActive    = true;
+
+    // If this job was previously rejected, its activeListings slot was
+    // released — re-claim it so the counter stays consistent.
+    if (job.postedBy && prevStatus === 'rejected') {
+      await EmployerProfile.findOneAndUpdate(
+        { user: job.postedBy },
+        { $inc: { activeListings: 1 } }
+      );
+    }
   } else if (action === 'reject') {
     job.adminStatus       = 'rejected';
     job.isActive          = false;

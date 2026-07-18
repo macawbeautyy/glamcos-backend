@@ -24,7 +24,7 @@ const {
 router.get('/', getJobs);
 
 // ── Admin routes (before /:id to avoid conflicts) ─────────────────────────────
-router.get('/admin/applications', protect, authorize('admin'), getAllApplications);
+router.get('/admin/applications', protect, authorize('admin', 'superadmin'), getAllApplications);
 
 // ── Seeker routes ─────────────────────────────────────────────────────────────
 router.get('/applications/my', protect, getMyApplications);

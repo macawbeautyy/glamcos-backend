@@ -11,7 +11,22 @@ const admin        = require('../config/firebase');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiResponse  = require('../utils/ApiResponse');
 
-const db = admin.firestore();
+// Lazy Firestore handle — admin may be uninitialized on local machines
+// without Firebase credentials (see src/config/firebase.js). Resolving it
+// at call time (instead of module load) lets the server boot; support-chat
+// endpoints simply return an error until credentials are configured.
+let _db = null;
+const db = new Proxy({}, {
+  get(_t, prop) {
+    if (!_db) {
+      if (!admin.apps.length) {
+        throw new Error('Firebase Admin not configured on this server (missing FIREBASE_* env vars)');
+      }
+      _db = admin.firestore();
+    }
+    return _db[prop];
+  },
+});
 
 // ── POST /support/notify ──────────────────────────────────────────────────────
 // Called by the mobile app whenever a USER sends a support message.
