@@ -551,6 +551,45 @@ const verifyJobApplicantUnlockPayment = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Admin: manually add a job listing (no employer account needed).
+ * Created pre-approved and immediately live.
+ * @route POST /api/v1/jobs/admin
+ */
+const adminCreateJob = asyncHandler(async (req, res) => {
+  const {
+    title, companyName, description, requirements,
+    city, state, jobType, category, skills,
+    salaryMin, salaryMax, experience, openings,
+    contactEmail, isFeatured, isUrgent,
+  } = req.body;
+
+  if (!title || !String(title).trim()) throw ApiError.badRequest('title is required');
+  if (!companyName || !String(companyName).trim()) throw ApiError.badRequest('companyName is required');
+
+  const job = await Job.create({
+    title: String(title).trim(),
+    companyName: String(companyName).trim(),
+    postedBy: req.user?._id || req.user?.id,
+    description: description || '',
+    requirements: requirements || '',
+    location: { city: city || '', state: state || '', address: '' },
+    jobType: jobType || 'full_time',
+    category: category || 'other',
+    salary: { min: Number(salaryMin) || 0, max: Number(salaryMax) || 0, currency: 'INR', period: 'month' },
+    experience: experience || '',
+    skills: Array.isArray(skills) ? skills : String(skills || '').split(',').map((s) => s.trim()).filter(Boolean),
+    openings: Number(openings) || 1,
+    contactEmail: contactEmail || '',
+    isActive: true,
+    isFeatured: !!isFeatured,
+    isUrgent: !!isUrgent,
+    adminStatus: 'approved',
+  });
+
+  return ApiResponse.created(res, { data: job, message: 'Job added and approved' });
+});
+
 module.exports = {
   getJobs,
   getJobById,
@@ -566,4 +605,5 @@ module.exports = {
   updateApplicationStatus,
   createJobApplicantUnlockOrder,
   verifyJobApplicantUnlockPayment,
+  adminCreateJob,
 };

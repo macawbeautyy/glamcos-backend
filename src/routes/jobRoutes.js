@@ -16,6 +16,7 @@ const {
   updateApplicationStatus,
   createJobApplicantUnlockOrder,
   verifyJobApplicantUnlockPayment,
+  adminCreateJob,
 } = require('../controllers/jobController');
 
 // ── IMPORTANT: Specific static routes must come BEFORE /:id wildcard routes ──
@@ -25,6 +26,7 @@ router.get('/', getJobs);
 
 // ── Admin routes (before /:id to avoid conflicts) ─────────────────────────────
 router.get('/admin/applications', protect, authorize('admin', 'superadmin'), getAllApplications);
+router.post('/admin', protect, authorize('admin', 'superadmin'), adminCreateJob);
 
 // ── Seeker routes ─────────────────────────────────────────────────────────────
 router.get('/applications/my', protect, getMyApplications);
