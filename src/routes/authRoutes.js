@@ -21,6 +21,7 @@ const {
   resetPassword,
   deleteAccount,
   adminDeleteUser,
+  getInstallsAnalytics,
 } = require('../controllers/authController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -81,5 +82,6 @@ router.delete('/me',           protect, deleteAccount);
 router.get(   '/admin/users',            protect, authorize('admin', 'superadmin'), getAllUsers);
 router.put(   '/admin/users/:id/status', protect, authorize('admin', 'superadmin'), updateUserStatus);
 router.delete('/admin/users/:id',        protect, authorize('superadmin'),           adminDeleteUser);
+router.get(   '/admin/analytics/installs', protect, authorize('admin', 'superadmin'), getInstallsAnalytics);
 
 module.exports = router;

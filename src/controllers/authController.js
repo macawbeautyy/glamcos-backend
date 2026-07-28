@@ -543,18 +543,36 @@ const sendTokenResponse = async (user, statusCode, message, res) => {
  * @access  Private
  */
 const updateLocation = asyncHandler(async (req, res) => {
-  const { latitude, longitude } = req.body;
+  const { latitude, longitude, state, city, platform } = req.body;
 
   if (latitude == null || longitude == null) {
     throw ApiError.badRequest('latitude and longitude are required');
   }
 
-  await User.findByIdAndUpdate(req.user.id, {
+  const lng = parseFloat(longitude);
+  const lat = parseFloat(latitude);
+
+  const update = {
     location: {
       type:        'Point',
-      coordinates: [parseFloat(longitude), parseFloat(latitude)],
+      coordinates: [lng, lat],
     },
-  });
+  };
+
+  // Only recorded when the on-device reverse geocode resolved a state/city —
+  // this is what powers the "installs by state" admin report. Never touches
+  // the user's manually-entered shipping address.
+  if (state || city) {
+    update.lastKnownLocation = {
+      state:       state || null,
+      city:        city || null,
+      coordinates: [lng, lat],
+      platform:    platform || null,
+      updatedAt:   new Date(),
+    };
+  }
+
+  await User.findByIdAndUpdate(req.user.id, update);
 
   return ApiResponse.success(res, {
     data: null,
@@ -754,6 +772,81 @@ const adminDeleteUser = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * @desc    Admin: Installs/signups over time (daily + cumulative, from the
+ *          first ever user to today) plus a breakdown by state, sourced from
+ *          on-device reverse-geocoded location (lastKnownLocation) with a
+ *          fallback to any manually-entered address.state.
+ * @route   GET /api/v1/auth/admin/analytics/installs
+ * @access  Admin
+ */
+const getInstallsAnalytics = asyncHandler(async (req, res) => {
+  const firstUser = await User.findOne({ isDeleted: { $ne: true } })
+    .sort({ createdAt: 1 })
+    .select('createdAt')
+    .lean();
+
+  const startDate = firstUser ? new Date(firstUser.createdAt) : new Date();
+  startDate.setUTCHours(0, 0, 0, 0);
+
+  const dailyAgg = await User.aggregate([
+    { $match: { isDeleted: { $ne: true }, createdAt: { $gte: startDate } } },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
+
+  const countsByDay = new Map(dailyAgg.map((d) => [d._id, d.count]));
+
+  // Fill in every day from the first signup to today (zero-filled gaps) so
+  // the chart is a continuous line rather than skipping quiet days.
+  const timeline = [];
+  let cumulative = 0;
+  const cursor = new Date(startDate);
+  const today  = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  while (cursor <= today) {
+    const key   = cursor.toISOString().slice(0, 10);
+    const count = countsByDay.get(key) || 0;
+    cumulative += count;
+    timeline.push({ date: key, count, cumulative });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  const stateAgg = await User.aggregate([
+    { $match: { isDeleted: { $ne: true } } },
+    {
+      $project: {
+        state: {
+          $ifNull: ['$lastKnownLocation.state', '$address.state'],
+        },
+      },
+    },
+    { $match: { state: { $nin: [null, ''] } } },
+    { $group: { _id: '$state', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 25 },
+  ]);
+
+  const totalUsers    = timeline.length ? timeline[timeline.length - 1].cumulative : 0;
+  const totalWithState = stateAgg.reduce((s, r) => s + r.count, 0);
+
+  return ApiResponse.success(res, {
+    data: {
+      timeline,
+      totalUsers,
+      byState: stateAgg.map((r) => ({ state: r._id, count: r.count })),
+      totalWithState,
+    },
+    message: 'Installs analytics fetched',
+  });
+});
+
 module.exports = {
   register,
   login,
@@ -773,4 +866,5 @@ module.exports = {
   resetPassword,
   deleteAccount,
   adminDeleteUser,
+  getInstallsAnalytics,
 };

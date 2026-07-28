@@ -149,6 +149,18 @@ const UserSchema = new mongoose.Schema(
       },
     },
 
+    // Last device-reported location (from on-device reverse geocoding when the
+    // user has granted location permission). Kept separate from `address` so it
+    // never overwrites a manually-entered shipping address. Used for install/
+    // signup geography reporting in the admin panel.
+    lastKnownLocation: {
+      state:      String,
+      city:       String,
+      coordinates: { type: [Number], default: undefined }, // [longitude, latitude]
+      platform:   String, // 'ios' | 'android' | 'web'
+      updatedAt:  Date,
+    },
+
     // --- Provider-specific fields ---
     providerProfile: {
       businessName: String,
