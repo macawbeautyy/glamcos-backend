@@ -38,7 +38,7 @@ router.get('/listings/mine', protect, async (req, res) => {
 });
 
 // GET  /franchise/listings/admin    — admin: all listings
-router.get('/listings/admin', protect, authorize('admin'), async (req, res) => {
+router.get('/listings/admin', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
     const { status } = req.query;
     const filter = {};
@@ -79,7 +79,7 @@ router.post('/listings', protect, async (req, res) => {
 });
 
 // PATCH /franchise/listings/:id/status — admin approve/reject
-router.patch('/listings/:id/status', protect, authorize('admin'), async (req, res) => {
+router.patch('/listings/:id/status', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
     const { status, adminNote } = req.body;
     const listing = await FranchiseListing.findByIdAndUpdate(
@@ -95,7 +95,7 @@ router.patch('/listings/:id/status', protect, authorize('admin'), async (req, re
 });
 
 // PATCH /franchise/listings/:id — admin full edit
-router.patch('/listings/:id', protect, authorize('admin'), async (req, res) => {
+router.patch('/listings/:id', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
     const listing = await FranchiseListing.findByIdAndUpdate(
       req.params.id,
@@ -110,7 +110,7 @@ router.patch('/listings/:id', protect, authorize('admin'), async (req, res) => {
 });
 
 // DELETE /franchise/listings/:id — admin delete
-router.delete('/listings/:id', protect, authorize('admin'), async (req, res) => {
+router.delete('/listings/:id', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
     await FranchiseListing.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Deleted' });
@@ -152,7 +152,7 @@ router.get('/my-inquiries', protect, async (req, res) => {
 });
 
 // GET /franchise/inquiries — admin only
-router.get('/inquiries', protect, authorize('admin'), async (req, res) => {
+router.get('/inquiries', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
     const inquiries = await FranchiseInquiry.find().sort({ createdAt: -1 }).lean();
     res.json({ success: true, data: inquiries });
@@ -162,7 +162,7 @@ router.get('/inquiries', protect, authorize('admin'), async (req, res) => {
 });
 
 // PATCH /franchise/inquiries/:id — admin only
-router.patch('/inquiries/:id', protect, authorize('admin'), async (req, res) => {
+router.patch('/inquiries/:id', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
     const { status, adminNote } = req.body;
     const inquiry = await FranchiseInquiry.findByIdAndUpdate(
