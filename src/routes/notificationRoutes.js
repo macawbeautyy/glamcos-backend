@@ -18,7 +18,7 @@ const {
   // User inbox
   getMyNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead,
   // Admin sidebar badge counts
-  getAdminBadgeCounts,
+  getAdminBadgeCounts, markBadgeViewed,
 } = require('../controllers/notificationController');
 
 const adminOnly = [protect, authorize('admin', 'superadmin')];
@@ -37,7 +37,8 @@ router.get('/history',         ...adminOnly, getHistory);
 router.get('/stats',           ...adminOnly, getStats);
 
 // ── Admin sidebar badge counts ────────────────────────────────────────────────
-router.get('/admin-badge-counts', ...adminOnly, getAdminBadgeCounts);
+router.get('/admin-badge-counts',            ...adminOnly, getAdminBadgeCounts);
+router.post('/admin-badge-counts/:key/viewed', ...adminOnly, markBadgeViewed);
 
 // ── Open tracking (called by mobile app on notification tap) ──────────────────
 router.post('/opened',         ...userAuth,  trackOpen);

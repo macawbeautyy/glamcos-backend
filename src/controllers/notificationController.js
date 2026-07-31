@@ -348,6 +348,14 @@ const safeCount = async (label, fn) => {
   catch (_e) { return [label, 0]; }
 };
 
+// Badge categories that support "clear on view" (see AdminBadgeView model).
+// Keys must match the admin panel sidebar nav paths exactly.
+const VIEWABLE_BADGE_KEYS = [
+  'job-seekers', 'job-employers', 'job-listings',
+  'franchise-inquiries', 'salon-space-inquiries', 'salon-partners',
+  'reels', 'sellers',
+];
+
 const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
   const JobSeekerProfile = require('../models/JobSeekerProfile');
   const EmployerProfile  = require('../models/EmployerProfile');
@@ -357,20 +365,44 @@ const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
   const SalonPartner     = require('../models/SalonPartner');
   const Reel             = require('../models/Reel');
   const SellerProfile    = require('../models/SellerProfile');
+  const AdminBadgeView   = require('../models/AdminBadgeView');
+
+  // viewedAt per key — a key an admin has never opened defaults to epoch 0,
+  // so everything currently pending still counts (nothing hidden by default).
+  const views = await AdminBadgeView.find({ key: { $in: VIEWABLE_BADGE_KEYS } }).lean().catch(() => []);
+  const viewedAt = Object.fromEntries(VIEWABLE_BADGE_KEYS.map((k) => [k, new Date(0)]));
+  views.forEach((v) => { viewedAt[v.key] = v.viewedAt; });
 
   const pairs = await Promise.all([
-    safeCount('job-seekers',           () => JobSeekerProfile.countDocuments({ status: 'pending' })),
-    safeCount('job-employers',         () => EmployerProfile.countDocuments({ status: 'pending' })),
-    safeCount('job-listings',          () => Job.countDocuments({ adminStatus: 'pending_review' })),
-    safeCount('franchise-inquiries',   () => FranchiseInquiry.countDocuments({ status: 'new' })),
-    safeCount('salon-space-inquiries', () => SalonSpaceInquiry.countDocuments({ status: 'new' })),
-    safeCount('salon-partners',        () => SalonPartner.countDocuments({ status: 'pending' })),
-    safeCount('reels',                 () => Reel.countDocuments({ isReported: true, moderationStatus: { $in: ['flagged', 'under_review'] } })),
-    safeCount('sellers',               () => SellerProfile.countDocuments({ status: 'pending' })),
+    safeCount('job-seekers',           () => JobSeekerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['job-seekers'] } })),
+    safeCount('job-employers',         () => EmployerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['job-employers'] } })),
+    safeCount('job-listings',          () => Job.countDocuments({ adminStatus: 'pending_review', createdAt: { $gt: viewedAt['job-listings'] } })),
+    safeCount('franchise-inquiries',   () => FranchiseInquiry.countDocuments({ status: 'new', createdAt: { $gt: viewedAt['franchise-inquiries'] } })),
+    safeCount('salon-space-inquiries', () => SalonSpaceInquiry.countDocuments({ status: 'new', createdAt: { $gt: viewedAt['salon-space-inquiries'] } })),
+    safeCount('salon-partners',        () => SalonPartner.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['salon-partners'] } })),
+    safeCount('reels',                 () => Reel.countDocuments({ isReported: true, moderationStatus: { $in: ['flagged', 'under_review'] }, updatedAt: { $gt: viewedAt['reels'] } })),
+    safeCount('sellers',               () => SellerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['sellers'] } })),
   ]);
 
   const counts = Object.fromEntries(pairs);
   return ok(res, counts);
+});
+
+// Called by the admin panel when an admin opens a badge's page — marks
+// "now" as the viewed cutoff for that key, so the badge clears immediately
+// and only climbs again for items created after this moment.
+const markBadgeViewed = asyncHandler(async (req, res) => {
+  const AdminBadgeView = require('../models/AdminBadgeView');
+  const { key } = req.params;
+  if (!VIEWABLE_BADGE_KEYS.includes(key)) {
+    return res.status(400).json({ success: false, message: 'Unknown badge key' });
+  }
+  await AdminBadgeView.findOneAndUpdate(
+    { key },
+    { $set: { viewedAt: new Date() } },
+    { upsert: true }
+  );
+  return ok(res, { key, viewedAt: new Date() });
 });
 
 module.exports = {
@@ -381,5 +413,5 @@ module.exports = {
   createTemplate, getTemplates, updateTemplate, deleteTemplate, sendFromTemplate,
   searchUsersForNotif,
   getMyNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead,
-  getAdminBadgeCounts,
+  getAdminBadgeCounts, markBadgeViewed,
 };
