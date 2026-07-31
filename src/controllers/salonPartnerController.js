@@ -61,6 +61,9 @@ exports.apply = async (req, res) => {
     });
 
     res.status(201).json({ message: 'Application submitted successfully!', partner });
+    require('../services/whatsappNotify').sendWhatsAppAlert(
+      `🏪 New Salon Partner application\n${salonName} (${ownerName})\n📞 ${phone}${city ? `\n📍 ${city}` : ''}`
+    ).catch(() => {});
   } catch (err) {
     console.error('SalonPartner apply error:', err);
     res.status(500).json({ message: 'Server error. Please try again.' });

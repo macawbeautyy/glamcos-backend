@@ -73,6 +73,9 @@ router.post('/listings', protect, async (req, res) => {
       owner: req.user?._id || req.user?.id,
     });
     res.status(201).json({ success: true, data: listing });
+    require('../services/whatsappNotify').sendWhatsAppAlert(
+      `🤝 New Franchise listing submitted\n${franchiseName}${city ? ` · 📍 ${city}` : ''}\n📞 ${contactPhone}`
+    ).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -135,6 +138,9 @@ router.post('/inquiries', protect, async (req, res) => {
       user: req.user?._id || req.user?.id || null,
     });
     res.status(201).json({ success: true, data: inquiry });
+    require('../services/whatsappNotify').sendWhatsAppAlert(
+      `📩 New Franchise inquiry\n${name}${franchiseName ? ` · ${franchiseName}` : ''}\n📞 ${phone}`
+    ).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

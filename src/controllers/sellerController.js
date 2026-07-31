@@ -420,6 +420,9 @@ exports.registerSeller = async (req, res) => {
     });
 
     res.status(201).json({ success: true, message: 'Seller registration submitted. Awaiting admin approval.', data: profile });
+    require('../services/whatsappNotify').sendWhatsAppAlert(
+      `🏪 New Seller registration\n${businessName}${phone ? `\n📞 ${phone}` : ''}`
+    ).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

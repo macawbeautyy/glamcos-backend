@@ -69,6 +69,9 @@ const registerEmployer = asyncHandler(async (req, res) => {
     status: 'pending',
   });
 
+  require('../services/whatsappNotify').sendWhatsAppAlert(
+    `🏢 New Employer registration\n${businessName}${phone ? `\n📞 ${phone}` : ''}`
+  ).catch(() => {});
   return ApiResponse.created(res, { data: profile, message: 'Registration submitted. Awaiting admin approval.' });
 });
 

@@ -198,6 +198,9 @@ const postJob = asyncHandler(async (req, res) => {
     await Promise.all([job.save(), empProfileForLink.save()]);
   }
 
+  require('../services/whatsappNotify').sendWhatsAppAlert(
+    `💼 New Job listing posted\n${job.title} @ ${job.companyName}`
+  ).catch(() => {});
   return ApiResponse.created(res, { data: job, message: 'Job posted successfully' });
 });
 

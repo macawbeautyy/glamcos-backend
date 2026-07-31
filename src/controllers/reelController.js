@@ -140,6 +140,10 @@ exports.createReel = asyncHandler(async (req, res) => {
   await reel.populate('user', 'firstName lastName avatar');
 
   res.status(201).json({ success: true, data: reel });
+  const uploader = reel.user?.firstName ? `${reel.user.firstName} ${reel.user.lastName || ''}`.trim() : 'a user';
+  require('../services/whatsappNotify').sendWhatsAppAlert(
+    `🎬 New Reel uploaded by ${uploader}${caption ? `\n"${caption.slice(0, 80)}"` : ''}`
+  ).catch(() => {});
 });
 
 /**

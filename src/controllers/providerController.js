@@ -60,6 +60,9 @@ const applyAsProvider = asyncHandler(async (req, res) => {
     console.warn('[Firebase] firestoreAdd/Increment skipped:', fbErr.message);
   }
 
+  require('../services/whatsappNotify').sendWhatsAppAlert(
+    `🧑‍🔧 New Provider application\n${displayName || 'Unnamed'}${city ? ` · 📍 ${city}` : ''}`
+  ).catch(() => {});
   return ApiResponse.created(res, {
     data: provider,
     message: 'Application submitted. Please complete KYC next.',
