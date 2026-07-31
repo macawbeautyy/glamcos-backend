@@ -42,6 +42,9 @@ router.use('/support',             require('./supportRoutes'));
 // ── Admin Notifications ───────────────────────────────────────────────────────
 router.use('/notifications',       require('./notificationRoutes'));
 
+// ── User activity tracking (screen views, taps) ────────────────────────────────
+router.use('/activity',            require('./activityRoutes'));
+
 // ── Phase 7: Explore / Reels ──────────────────────────────────────────────────
 router.use('/reels',               require('./reelRoutes'));
 

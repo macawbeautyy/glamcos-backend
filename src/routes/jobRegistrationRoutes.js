@@ -1,9 +1,10 @@
 const express = require('express');
+const multer  = require('multer');
 const router  = express.Router();
 const { protect, authorize } = require('../middleware/auth');
 const {
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
-  upsertSeekerProfile, getMySeekerProfile,
+  upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV,
   getPlans, subscribeToPlan,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
@@ -33,6 +34,22 @@ router.put('/employer/me',           protect, updateEmployerProfile);
 // ── Seeker ────────────────────────────────────────────────────────────────────
 router.post('/seeker/profile',       protect, upsertSeekerProfile);
 router.get('/seeker/me',             protect, getMySeekerProfile);
+
+// CV file upload: images (photo/scan of CV) or PDF/DOC/DOCX, max 10 MB
+const cvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
+    if (file.mimetype.startsWith('image/') || allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only images, PDF, or Word documents are allowed'), false);
+  },
+});
+router.post('/seeker/upload-cv',     protect, cvUpload.single('cv'), uploadSeekerCV);
 
 // ── Plans (public) ────────────────────────────────────────────────────────────
 // ── Candidate browsing (employer side, earning model) ───────────────────────

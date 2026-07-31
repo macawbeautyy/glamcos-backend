@@ -339,6 +339,40 @@ const markAllNotificationsRead = asyncHandler(async (req, res) => {
   return ok(res, {}, 'All notifications marked as read');
 });
 
+// ── ADMIN SIDEBAR BADGE COUNTS ──────────────────────────────────────────────
+// Counts of "needs admin attention" items across the platform, shown as
+// notification badges in the admin panel sidebar. Each count is independently
+// try/caught so one broken model doesn't blank out the whole response.
+const safeCount = async (label, fn) => {
+  try { return [label, await fn()]; }
+  catch (_e) { return [label, 0]; }
+};
+
+const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
+  const JobSeekerProfile = require('../models/JobSeekerProfile');
+  const EmployerProfile  = require('../models/EmployerProfile');
+  const Job              = require('../models/Job');
+  const FranchiseInquiry = require('../models/FranchiseInquiry');
+  const SalonSpaceInquiry= require('../models/SalonSpaceInquiry');
+  const SalonPartner     = require('../models/SalonPartner');
+  const Reel             = require('../models/Reel');
+  const SellerProfile    = require('../models/SellerProfile');
+
+  const pairs = await Promise.all([
+    safeCount('job-seekers',           () => JobSeekerProfile.countDocuments({ status: 'pending' })),
+    safeCount('job-employers',         () => EmployerProfile.countDocuments({ status: 'pending' })),
+    safeCount('job-listings',          () => Job.countDocuments({ adminStatus: 'pending_review' })),
+    safeCount('franchise-inquiries',   () => FranchiseInquiry.countDocuments({ status: 'new' })),
+    safeCount('salon-space-inquiries', () => SalonSpaceInquiry.countDocuments({ status: 'new' })),
+    safeCount('salon-partners',        () => SalonPartner.countDocuments({ status: 'pending' })),
+    safeCount('reels',                 () => Reel.countDocuments({ isReported: true, moderationStatus: { $in: ['flagged', 'under_review'] } })),
+    safeCount('sellers',               () => SellerProfile.countDocuments({ status: 'pending' })),
+  ]);
+
+  const counts = Object.fromEntries(pairs);
+  return ok(res, counts);
+});
+
 module.exports = {
   sendToSingleUser, sendToMultipleUsers, broadcast,
   notifyProviders, notifyByCity, notifyInactive,
@@ -347,4 +381,5 @@ module.exports = {
   createTemplate, getTemplates, updateTemplate, deleteTemplate, sendFromTemplate,
   searchUsersForNotif,
   getMyNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead,
+  getAdminBadgeCounts,
 };

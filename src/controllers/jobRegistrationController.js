@@ -149,6 +149,64 @@ const getMySeekerProfile = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: profile });
 });
 
+/**
+ * Upload CV file (PDF/DOC/DOCX) or a photo/scan of the CV (image).
+ * Uploads to Cloudinary and returns the URL — caller must still save it
+ * onto the profile via upsertSeekerProfile (same pattern as avatar upload).
+ */
+const uploadSeekerCV = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest('No file provided');
+
+  const axios    = require('axios');
+  const FormData = require('form-data');
+  const path     = require('path');
+
+  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
+  const apiKey       = process.env.CLOUDINARY_API_KEY;
+  const apiSecret    = process.env.CLOUDINARY_API_SECRET;
+
+  if (!cloudName) throw ApiError.serviceUnavailable('File storage not configured');
+
+  const uid          = userId(req);
+  const isImage       = req.file.mimetype.startsWith('image/');
+  const resourceType  = isImage ? 'image' : 'raw';
+  const ext           = path.extname(req.file.originalname) || (isImage ? '.jpg' : '.pdf');
+  const originalName  = req.file.originalname || `cv${ext}`;
+  const folder         = `cvs/${uid}`;
+  const publicFilename = `cv_${uid}_${Date.now()}${ext}`;
+
+  const form = new FormData();
+  form.append('file', req.file.buffer, { filename: publicFilename, contentType: req.file.mimetype });
+  form.append('resource_type', resourceType);
+  form.append('folder', folder);
+
+  let fileUrl;
+  const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
+  if (uploadPreset) {
+    form.append('upload_preset', uploadPreset);
+    const r = await axios.post(endpoint, form, { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000 });
+    fileUrl = r.data.secure_url;
+  } else if (apiKey && apiSecret) {
+    const crypto2   = require('crypto');
+    const timestamp = Math.floor(Date.now() / 1000);
+    const toSign    = `folder=${folder}&resource_type=${resourceType}&timestamp=${timestamp}${apiSecret}`;
+    const signature = crypto2.createHash('sha1').update(toSign).digest('hex');
+    form.append('api_key', apiKey);
+    form.append('timestamp', String(timestamp));
+    form.append('signature', signature);
+    const r = await axios.post(endpoint, form, { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60_000 });
+    fileUrl = r.data.secure_url;
+  } else {
+    throw ApiError.serviceUnavailable('Cloudinary credentials not configured');
+  }
+
+  return ApiResponse.success(res, {
+    data: { cvUrl: fileUrl, cvFilename: originalName },
+    message: 'CV uploaded successfully',
+  });
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  SUBSCRIPTION PLANS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1054,7 +1112,7 @@ module.exports = {
   getMyCandidateContacts,
   adminReviewSeeker,
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
-  upsertSeekerProfile, getMySeekerProfile,
+  upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV,
   getPlans, subscribeToPlan,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
