@@ -353,7 +353,7 @@ const safeCount = async (label, fn) => {
 const VIEWABLE_BADGE_KEYS = [
   'job-seekers', 'job-employers', 'job-listings',
   'franchise-inquiries', 'salon-space-inquiries', 'salon-partners',
-  'reels', 'sellers',
+  'reels', 'sellers', 'providers',
 ];
 
 const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
@@ -361,10 +361,13 @@ const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
   const EmployerProfile  = require('../models/EmployerProfile');
   const Job              = require('../models/Job');
   const FranchiseInquiry = require('../models/FranchiseInquiry');
+  const FranchiseListing = require('../models/FranchiseListing');
   const SalonSpaceInquiry= require('../models/SalonSpaceInquiry');
+  const SalonSpaceListing= require('../models/SalonSpaceListing');
   const SalonPartner     = require('../models/SalonPartner');
   const Reel             = require('../models/Reel');
   const SellerProfile    = require('../models/SellerProfile');
+  const Provider         = require('../models/Provider');
   const AdminBadgeView   = require('../models/AdminBadgeView');
 
   // viewedAt per key — a key an admin has never opened defaults to epoch 0,
@@ -377,11 +380,40 @@ const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
     safeCount('job-seekers',           () => JobSeekerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['job-seekers'] } })),
     safeCount('job-employers',         () => EmployerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['job-employers'] } })),
     safeCount('job-listings',          () => Job.countDocuments({ adminStatus: 'pending_review', createdAt: { $gt: viewedAt['job-listings'] } })),
-    safeCount('franchise-inquiries',   () => FranchiseInquiry.countDocuments({ status: 'new', createdAt: { $gt: viewedAt['franchise-inquiries'] } })),
-    safeCount('salon-space-inquiries', () => SalonSpaceInquiry.countDocuments({ status: 'new', createdAt: { $gt: viewedAt['salon-space-inquiries'] } })),
+    // Franchise page has two tabs (Listings + Inquiries) — badge covers both,
+    // so submitting either a franchise listing or a contact inquiry notifies.
+    safeCount('franchise-inquiries',   async () => {
+      const [inq, lst] = await Promise.all([
+        FranchiseInquiry.countDocuments({ status: 'new', createdAt: { $gt: viewedAt['franchise-inquiries'] } }),
+        FranchiseListing.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['franchise-inquiries'] } }),
+      ]);
+      return inq + lst;
+    }),
+    // Same pattern for Salon Spaces (Listings + Inquiries tabs).
+    safeCount('salon-space-inquiries', async () => {
+      const [inq, lst] = await Promise.all([
+        SalonSpaceInquiry.countDocuments({ status: 'new', createdAt: { $gt: viewedAt['salon-space-inquiries'] } }),
+        SalonSpaceListing.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['salon-space-inquiries'] } }),
+      ]);
+      return inq + lst;
+    }),
     safeCount('salon-partners',        () => SalonPartner.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['salon-partners'] } })),
-    safeCount('reels',                 () => Reel.countDocuments({ isReported: true, moderationStatus: { $in: ['flagged', 'under_review'] }, updatedAt: { $gt: viewedAt['reels'] } })),
+    // Reels: every new upload notifies (not just reported ones), plus any
+    // older reel newly reported/flagged since the admin last checked.
+    safeCount('reels', async () => {
+      const [uploads, newlyReported] = await Promise.all([
+        Reel.countDocuments({ createdAt: { $gt: viewedAt['reels'] } }),
+        Reel.countDocuments({
+          createdAt: { $lte: viewedAt['reels'] },
+          isReported: true,
+          moderationStatus: { $in: ['flagged', 'under_review'] },
+          updatedAt: { $gt: viewedAt['reels'] },
+        }),
+      ]);
+      return uploads + newlyReported;
+    }),
     safeCount('sellers',               () => SellerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['sellers'] } })),
+    safeCount('providers',             () => Provider.countDocuments({ status: { $in: ['pending', 'kyc_pending'] }, createdAt: { $gt: viewedAt['providers'] } })),
   ]);
 
   const counts = Object.fromEntries(pairs);
