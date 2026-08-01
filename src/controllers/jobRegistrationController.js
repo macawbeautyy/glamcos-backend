@@ -115,6 +115,8 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
 
   if (!fullName) throw ApiError.badRequest('Full name is required');
 
+  const isNewProfile = !(await JobSeekerProfile.exists({ user: uid }));
+
   const data = {
     user: uid, fullName, phone, email, dateOfBirth, gender, profilePhoto,
     title, bio, specializations, skills, certifications, experience, currentCity,
@@ -138,6 +140,12 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
     profile.status = 'approved';
     profile.rejectionReason = '';
     await profile.save();
+  }
+
+  if (isNewProfile) {
+    require('../services/whatsappNotify').sendWhatsAppAlert(
+      `🔍 New Job Seeker profile\n${fullName}${currentCity ? ` · 📍 ${currentCity}` : ''}`
+    ).catch(() => {});
   }
 
   return ApiResponse.success(res, {

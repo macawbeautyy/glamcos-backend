@@ -188,6 +188,10 @@ const createProduct = asyncHandler(async (req, res) => {
 
   await product.populate('category', 'name slug');
 
+  require('../services/whatsappNotify').sendWhatsAppAlert(
+    `🛍️ New Product submitted for approval\n${name}${price ? ` · ₹${price}` : ''}`
+  ).catch(() => {});
+
   return ApiResponse.created(res, {
     data: product,
     message: 'Product created and submitted for approval',

@@ -40,6 +40,12 @@ const register = asyncHandler(async (req, res) => {
     status: 'active',
   });
 
+  if (userRole === 'user') {
+    require('../services/whatsappNotify').sendWhatsAppAlert(
+      `👤 New user signed up\n${firstName} ${lastName || ''}`.trim()
+    ).catch(() => {});
+  }
+
   sendTokenResponse(user, 201, 'Account created successfully', res);
 });
 

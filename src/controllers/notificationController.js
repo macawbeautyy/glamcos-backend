@@ -353,7 +353,8 @@ const safeCount = async (label, fn) => {
 const VIEWABLE_BADGE_KEYS = [
   'job-seekers', 'job-employers', 'job-listings',
   'franchise-inquiries', 'salon-space-inquiries', 'salon-partners',
-  'reels', 'sellers', 'providers',
+  'reels', 'sellers',
+  'users', 'products', 'orders', 'job-applicants',
 ];
 
 const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
@@ -367,7 +368,9 @@ const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
   const SalonPartner     = require('../models/SalonPartner');
   const Reel             = require('../models/Reel');
   const SellerProfile    = require('../models/SellerProfile');
-  const Provider         = require('../models/Provider');
+  const User             = require('../models/User');
+  const Product          = require('../models/Product');
+  const Order            = require('../models/Order');
   const AdminBadgeView   = require('../models/AdminBadgeView');
 
   // viewedAt per key — a key an admin has never opened defaults to epoch 0,
@@ -377,7 +380,10 @@ const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
   views.forEach((v) => { viewedAt[v.key] = v.viewedAt; });
 
   const pairs = await Promise.all([
-    safeCount('job-seekers',           () => JobSeekerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['job-seekers'] } })),
+    // Job seeker profiles auto-approve the instant they're created (see
+    // upsertSeekerProfile), so a status:'pending' filter never matches —
+    // count every new profile instead, excluding admin-added manual ones.
+    safeCount('job-seekers',           () => JobSeekerProfile.countDocuments({ isManual: { $ne: true }, createdAt: { $gt: viewedAt['job-seekers'] } })),
     safeCount('job-employers',         () => EmployerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['job-employers'] } })),
     safeCount('job-listings',          () => Job.countDocuments({ adminStatus: 'pending_review', createdAt: { $gt: viewedAt['job-listings'] } })),
     // Franchise page has two tabs (Listings + Inquiries) — badge covers both,
@@ -413,7 +419,19 @@ const getAdminBadgeCounts = asyncHandler(async (_req, res) => {
       return uploads + newlyReported;
     }),
     safeCount('sellers',               () => SellerProfile.countDocuments({ status: 'pending', createdAt: { $gt: viewedAt['sellers'] } })),
-    safeCount('providers',             () => Provider.countDocuments({ status: { $in: ['pending', 'kyc_pending'] }, createdAt: { $gt: viewedAt['providers'] } })),
+    // Every new customer signup (excludes provider/vendor/admin — those already have their own badges).
+    safeCount('users',                 () => User.countDocuments({ role: 'user', createdAt: { $gt: viewedAt['users'] } })),
+    safeCount('products',              () => Product.countDocuments({ status: 'pending_approval', createdAt: { $gt: viewedAt['products'] } })),
+    safeCount('orders',                () => Order.countDocuments({ createdAt: { $gt: viewedAt['orders'] } })),
+    // Applications are embedded sub-documents on Job — aggregate across all jobs.
+    safeCount('job-applicants', async () => {
+      const result = await Job.aggregate([
+        { $unwind: '$applications' },
+        { $match: { 'applications.appliedAt': { $gt: viewedAt['job-applicants'] } } },
+        { $count: 'n' },
+      ]);
+      return result[0]?.n || 0;
+    }),
   ]);
 
   const counts = Object.fromEntries(pairs);

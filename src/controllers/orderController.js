@@ -154,6 +154,10 @@ const createOrder = asyncHandler(async (req, res) => {
     orderNumber: order.orderNumber,
   }).catch(() => {});
 
+  require('../services/whatsappNotify').sendWhatsAppAlert(
+    `📦 New Order placed\n#${order.orderNumber || order._id} · ₹${total}`
+  ).catch(() => {});
+
   // Notify each unique seller that they have a new order (non-blocking)
   const sellerMap = new Map();
   for (const line of orderItems) {
