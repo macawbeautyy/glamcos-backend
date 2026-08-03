@@ -123,4 +123,47 @@ const adminGetUserActivitySummary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { logEvents, adminGetUserActivity, adminGetUserActivitySummary };
+/**
+ * Admin: recently-active users, most recent first — powers the sidebar list
+ * on the User Activity page so admins don't have to search by name first.
+ * @route GET /api/v1/activity/admin/recent-users
+ * @query { limit }  default 30, max 100
+ */
+const adminGetRecentUsers = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+
+  const grouped = await UserActivityEvent.aggregate([
+    { $sort: { clientAt: -1 } },
+    { $group: { _id: '$user', lastSeen: { $first: '$clientAt' }, eventCount: { $sum: 1 } } },
+    { $sort: { lastSeen: -1 } },
+    { $limit: limit },
+  ]);
+
+  const userIds = grouped.map((g) => g._id).filter(Boolean);
+  const users = await User.find({ _id: { $in: userIds } })
+    .select('firstName lastName email phone avatar role')
+    .lean();
+  const userMap = new Map(users.map((u) => [String(u._id), u]));
+
+  const shaped = grouped
+    .map((g) => {
+      const u = userMap.get(String(g._id));
+      if (!u) return null; // user was deleted but events remain — skip
+      return {
+        _id:        u._id,
+        firstName:  u.firstName,
+        lastName:   u.lastName,
+        email:      u.email,
+        phone:      u.phone,
+        avatar:     u.avatar,
+        role:       u.role,
+        lastSeen:   g.lastSeen,
+        eventCount: g.eventCount,
+      };
+    })
+    .filter(Boolean);
+
+  return ok(res, { users: shaped });
+});
+
+module.exports = { logEvents, adminGetUserActivity, adminGetUserActivitySummary, adminGetRecentUsers };

@@ -34,7 +34,7 @@ const getPendingServices = asyncHandler(async (req, res) => {
 
   const [services, total] = await Promise.all([
     Service.find(filter)
-      .sort({ createdAt: 1 }) // Oldest first (FIFO)
+      .sort({ createdAt: -1 }) // Newest first
       .skip(skip)
       .limit(limit)
       .populate('category', 'name slug')

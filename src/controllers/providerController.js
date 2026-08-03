@@ -260,7 +260,7 @@ const getProviderEarnings = asyncHandler(async (req, res) => {
 
 const getPendingProviders = asyncHandler(async (req, res) => {
   const providers = await Provider.find({ status: { $in: ['pending', 'kyc_pending'] } })
-    .sort({ createdAt: 1 })
+    .sort({ createdAt: -1 })
     .populate('user', 'firstName lastName email phone')
     .lean();
 

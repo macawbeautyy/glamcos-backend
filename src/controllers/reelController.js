@@ -688,6 +688,7 @@ exports.toggleFollow = asyncHandler(async (req, res) => {
  */
 exports.getFollowers = asyncHandler(async (req, res) => {
   const follows = await Follow.find({ following: req.params.userId })
+    .sort({ createdAt: -1 })
     .populate('follower', 'firstName lastName avatar')
     .lean();
   res.json({ success: true, data: follows.map((f) => f.follower), count: follows.length });
@@ -699,6 +700,7 @@ exports.getFollowers = asyncHandler(async (req, res) => {
  */
 exports.getFollowing = asyncHandler(async (req, res) => {
   const follows = await Follow.find({ follower: req.params.userId })
+    .sort({ createdAt: -1 })
     .populate('following', 'firstName lastName avatar')
     .lean();
   res.json({ success: true, data: follows.map((f) => f.following), count: follows.length });
