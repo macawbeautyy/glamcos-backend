@@ -48,6 +48,9 @@ router.use('/activity',            require('./activityRoutes'));
 // ── Phase 7: Explore / Reels ──────────────────────────────────────────────────
 router.use('/reels',               require('./reelRoutes'));
 
+// ── Generic authenticated file uploads (listing photos/videos etc.) ────────────
+router.use('/uploads',             require('./uploadRoutes'));
+
 
 // ── Admin maintenance (superadmin only) ──────────────────────────────────────────
 router.use('/admin-maintenance',   require('./maintenanceRoutes'));

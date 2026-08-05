@@ -56,27 +56,103 @@ router.get('/listings/admin', protect, authorize('admin', 'superadmin'), async (
   }
 });
 
+// Fields accepted from the client for both create and owner-edit — kept as
+// one list so the two routes can't silently drift apart.
+const LISTING_FIELDS = [
+  'title', 'description', 'category', 'spaceType', 'listingType', 'saleScope',
+  'address', 'landmark', 'city', 'pincode', 'area', 'location',
+  'areaUnit', 'carpetAreaSqft', 'builtupAreaSqft', 'floor', 'totalFloors', 'furnishing',
+  'washrooms', 'parking', 'powerBackupKW', 'frontageWidthFt', 'amenities',
+  'chairs', 'treatmentRooms', 'equipment', 'staffCount', 'staffStaying',
+  'brandAffiliation', 'licenses', 'yearsInOperation', 'monthlyRevenue',
+  'reasonForSelling',
+  'askingPrice', 'negotiable', 'ownershipType', 'possessionStatus',
+  'monthlyRent', 'securityDeposit', 'maintenanceCharges', 'lockInMonths',
+  'leaseTenureYears', 'availableFrom', 'subLeasePermitted',
+  'images', 'videos',
+  'contactName', 'contactPhone', 'contactEmail',
+];
+
+function pickListingFields(body) {
+  const out = {};
+  for (const f of LISTING_FIELDS) {
+    if (body[f] !== undefined) out[f] = body[f];
+  }
+  // Keep the legacy `price` field in sync so old sort/filter code keeps working.
+  out.price = body.listingType === 'sale' ? (Number(body.askingPrice) || 0) : (Number(body.monthlyRent) || 0);
+  return out;
+}
+
 // POST /salon-spaces/listings          — authenticated user submits a listing
 router.post('/listings', protect, async (req, res) => {
   try {
-    const {
-      title, description, spaceType, listingType, price,
-      area, city, address, amenities,
-      contactName, contactPhone, contactEmail,
-    } = req.body;
-    if (!title || !contactPhone) {
+    const data = pickListingFields(req.body);
+    if (!data.title || !req.body.contactPhone) {
       return res.status(400).json({ success: false, message: 'title and contactPhone are required' });
     }
     const listing = await SalonSpaceListing.create({
-      title, description, spaceType, listingType, price,
-      area, city, address, amenities,
-      contactName, contactPhone, contactEmail,
+      ...data,
       owner: req.user?._id || req.user?.id,
     });
     res.status(201).json({ success: true, data: listing });
     require('../services/whatsappNotify').sendWhatsAppAlert(
-      `🏠 New Salon Space listing submitted\n${title}${city ? ` · 📍 ${city}` : ''}\n📞 ${contactPhone}`
+      `🏠 New Salon Space listing submitted\n${data.title}${data.city ? ` · 📍 ${data.city}` : ''}\n📞 ${data.contactPhone}`
     ).catch(() => {});
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PATCH /salon-spaces/listings/mine/:id — owner edits their own listing.
+// If it was already approved, editing drops it back to "pending" so admin
+// re-reviews the new content before it goes live again (same policy as
+// FranchiseListing — an in-place update, no draft/versioning system, so the
+// listing disappears from the public "approved" list immediately until
+// admin re-approves it).
+router.patch('/listings/mine/:id', protect, async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const existing = await SalonSpaceListing.findById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (String(existing.owner) !== String(userId)) {
+      return res.status(403).json({ success: false, message: 'You can only edit your own listing' });
+    }
+
+    const data = pickListingFields(req.body);
+    if (!data.title || !req.body.contactPhone) {
+      return res.status(400).json({ success: false, message: 'title and contactPhone are required' });
+    }
+
+    const wasApproved = existing.status === 'approved';
+    const update = { ...data, adminNote: '' };
+    if (wasApproved) {
+      update.status = 'pending';
+      update.wasApprovedBeforeEdit = true;
+    }
+
+    const listing = await SalonSpaceListing.findByIdAndUpdate(req.params.id, { $set: update }, { new: true });
+    res.json({ success: true, data: listing });
+    if (wasApproved) {
+      require('../services/whatsappNotify').sendWhatsAppAlert(
+        `✏️ Salon Space listing edited & needs re-review\n${data.title}${data.city ? ` · 📍 ${data.city}` : ''}`
+      ).catch(() => {});
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /salon-spaces/listings/mine/:id — owner deletes their own listing
+router.delete('/listings/mine/:id', protect, async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const existing = await SalonSpaceListing.findById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (String(existing.owner) !== String(userId)) {
+      return res.status(403).json({ success: false, message: 'You can only delete your own listing' });
+    }
+    await SalonSpaceListing.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

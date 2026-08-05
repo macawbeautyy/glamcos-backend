@@ -163,6 +163,22 @@ router.patch('/listings/:id', protect, authorize('admin', 'superadmin'), async (
   }
 });
 
+// DELETE /franchise/listings/mine/:id — owner deletes their own listing
+router.delete('/listings/mine/:id', protect, async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const existing = await FranchiseListing.findById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (String(existing.owner) !== String(userId)) {
+      return res.status(403).json({ success: false, message: 'You can only delete your own listing' });
+    }
+    await FranchiseListing.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // DELETE /franchise/listings/:id — admin delete
 router.delete('/listings/:id', protect, authorize('admin', 'superadmin'), async (req, res) => {
   try {
