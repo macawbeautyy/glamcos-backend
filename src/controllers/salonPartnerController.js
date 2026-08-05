@@ -39,10 +39,10 @@ function geocode(address, city, pincode) {
 exports.apply = async (req, res) => {
   try {
     const {
-      ownerName, phone, email, salonName, yearsOld,
+      ownerName, phone, email, salonName, yearsOld, description,
       address, city, pincode, avgMonthlySale,
       seatingCapacity, hasGst, gstNumber, services,
-      enableBooking, lat, lng,
+      enableBooking, lat, lng, images,
     } = req.body;
 
     const existing = await SalonPartner.findOne({ phone, status: 'pending' });
@@ -51,10 +51,11 @@ exports.apply = async (req, res) => {
     }
 
     const partner = await SalonPartner.create({
-      ownerName, phone, email, salonName, yearsOld,
+      ownerName, phone, email, salonName, yearsOld, description,
       address, city, pincode, avgMonthlySale,
       seatingCapacity, hasGst, gstNumber, services,
       enableBooking,
+      images: Array.isArray(images) ? images.slice(0, 10) : [],
       lat:    lat  || undefined,
       lng:    lng  || undefined,
       userId: req.user ? req.user._id : undefined,
