@@ -59,7 +59,7 @@ router.post('/listings', protect, async (req, res) => {
     const {
       franchiseName, tagline, description, category, tier,
       investmentMin, investmentMax, roi, breakEven,
-      city, locationsAvail, support,
+      city, locationsAvail, support, images,
       contactName, contactPhone, contactEmail,
     } = req.body;
     if (!franchiseName || !contactPhone) {
@@ -68,7 +68,7 @@ router.post('/listings', protect, async (req, res) => {
     const listing = await FranchiseListing.create({
       franchiseName, tagline, description, category, tier,
       investmentMin, investmentMax, roi, breakEven,
-      city, locationsAvail, support,
+      city, locationsAvail, support, images,
       contactName, contactPhone, contactEmail,
       owner: req.user?._id || req.user?.id,
     });
@@ -76,6 +76,57 @@ router.post('/listings', protect, async (req, res) => {
     require('../services/whatsappNotify').sendWhatsAppAlert(
       `🤝 New Franchise listing submitted\n${franchiseName}${city ? ` · 📍 ${city}` : ''}\n📞 ${contactPhone}`
     ).catch(() => {});
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PATCH /franchise/listings/mine/:id — owner edits their own listing.
+// If it was already approved, editing drops it back to "pending" so admin
+// re-reviews the new content before it goes live again. Note: this is an
+// in-place update, so the listing disappears from the public "approved"
+// list immediately until admin re-approves — it does NOT stay live with
+// the old content while the edit is under review (that would need a
+// separate draft/versioning system, which doesn't exist here).
+router.patch('/listings/mine/:id', protect, async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const existing = await FranchiseListing.findById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (String(existing.owner) !== String(userId)) {
+      return res.status(403).json({ success: false, message: 'You can only edit your own listing' });
+    }
+
+    const {
+      franchiseName, tagline, description, category, tier,
+      investmentMin, investmentMax, roi, breakEven,
+      city, locationsAvail, support, images,
+      contactName, contactPhone, contactEmail,
+    } = req.body;
+    if (!franchiseName || !contactPhone) {
+      return res.status(400).json({ success: false, message: 'franchiseName and contactPhone are required' });
+    }
+
+    const wasApproved = existing.status === 'approved';
+    const update = {
+      franchiseName, tagline, description, category, tier,
+      investmentMin, investmentMax, roi, breakEven,
+      city, locationsAvail, support, images,
+      contactName, contactPhone, contactEmail,
+      adminNote: '',
+    };
+    if (wasApproved) {
+      update.status = 'pending';
+      update.wasApprovedBeforeEdit = true;
+    }
+
+    const listing = await FranchiseListing.findByIdAndUpdate(req.params.id, { $set: update }, { new: true });
+    res.json({ success: true, data: listing });
+    if (wasApproved) {
+      require('../services/whatsappNotify').sendWhatsAppAlert(
+        `✏️ Franchise listing edited & needs re-review\n${franchiseName}${city ? ` · 📍 ${city}` : ''}`
+      ).catch(() => {});
+    }
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

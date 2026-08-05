@@ -21,6 +21,9 @@ const franchiseListingSchema = new mongoose.Schema({
   // Support
   support: [{ type: String }],
 
+  // Photos — Cloudinary secure_urls, first image is treated as the cover.
+  images: [{ type: String }],
+
   // Contact
   contactName:  { type: String, default: '', trim: true },
   contactPhone: { type: String, default: '', trim: true },
@@ -32,6 +35,11 @@ const franchiseListingSchema = new mongoose.Schema({
   // Admin workflow
   status:    { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   adminNote: { type: String, default: '' },
+
+  // Set to true whenever an owner edits an already-approved listing, so it
+  // drops back into the pending queue for re-review without losing the fact
+  // that it was live before (admin panel can badge these as "re-review").
+  wasApprovedBeforeEdit: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FranchiseListing', franchiseListingSchema);
