@@ -16,7 +16,7 @@ const ApiError = require('./ApiError');
  *   CLOUDINARY_CLOUD_NAME + CLOUDINARY_UPLOAD_PRESET  (unsigned), or
  *   CLOUDINARY_CLOUD_NAME + CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET (signed)
  *
- * resourceType: 'image' | 'video'
+ * resourceType: 'image' | 'video' | 'raw' (raw = PDFs/documents)
  * Returns the secure CDN URL.
  */
 async function uploadToCloudinary(buffer, originalName, userId, resourceType = 'image', folder = null) {
@@ -29,8 +29,9 @@ async function uploadToCloudinary(buffer, originalName, userId, resourceType = '
     throw new ApiError('File storage is not configured on the server. Please set CLOUDINARY_CLOUD_NAME in environment variables.', 503);
   }
 
-  const ext         = path.extname(originalName) || (resourceType === 'image' ? '.jpg' : '.mp4');
-  const contentType = resourceType === 'image' ? 'image/jpeg' : 'video/mp4';
+  const defaultExt  = resourceType === 'image' ? '.jpg' : resourceType === 'video' ? '.mp4' : '.pdf';
+  const ext         = path.extname(originalName) || defaultExt;
+  const contentType = resourceType === 'image' ? 'image/jpeg' : resourceType === 'video' ? 'video/mp4' : 'application/pdf';
   const uploadFolder = folder || `uploads/${userId}`;
 
   const form = new FormData();

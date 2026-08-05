@@ -60,6 +60,7 @@ router.post('/listings', protect, async (req, res) => {
       franchiseName, tagline, description, category, tier,
       investmentMin, investmentMax, roi, breakEven,
       city, locationsAvail, support, images,
+      brochureUrl, brochureName,
       contactName, contactPhone, contactEmail,
     } = req.body;
     if (!franchiseName || !contactPhone) {
@@ -69,6 +70,7 @@ router.post('/listings', protect, async (req, res) => {
       franchiseName, tagline, description, category, tier,
       investmentMin, investmentMax, roi, breakEven,
       city, locationsAvail, support, images,
+      brochureUrl, brochureName,
       contactName, contactPhone, contactEmail,
       owner: req.user?._id || req.user?.id,
     });
@@ -101,6 +103,7 @@ router.patch('/listings/mine/:id', protect, async (req, res) => {
       franchiseName, tagline, description, category, tier,
       investmentMin, investmentMax, roi, breakEven,
       city, locationsAvail, support, images,
+      brochureUrl, brochureName,
       contactName, contactPhone, contactEmail,
     } = req.body;
     if (!franchiseName || !contactPhone) {
@@ -112,6 +115,7 @@ router.patch('/listings/mine/:id', protect, async (req, res) => {
       franchiseName, tagline, description, category, tier,
       investmentMin, investmentMax, roi, breakEven,
       city, locationsAvail, support, images,
+      brochureUrl, brochureName,
       contactName, contactPhone, contactEmail,
       adminNote: '',
     };

@@ -24,6 +24,10 @@ const franchiseListingSchema = new mongoose.Schema({
   // Photos — Cloudinary secure_urls, first image is treated as the cover.
   images: [{ type: String }],
 
+  // Optional franchise brochure/pitch-deck PDF — Cloudinary raw-resource URL.
+  brochureUrl:  { type: String, default: '', trim: true },
+  brochureName: { type: String, default: '', trim: true },
+
   // Contact
   contactName:  { type: String, default: '', trim: true },
   contactPhone: { type: String, default: '', trim: true },
