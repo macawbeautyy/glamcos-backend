@@ -215,17 +215,18 @@ router.delete('/listings/:id', protect, authorize('admin', 'superadmin'), async 
 // POST /salon-spaces/inquiries — authenticated users
 router.post('/inquiries', protect, async (req, res) => {
   try {
-    const { spaceId, spaceTitle, name, phone, email, city, message } = req.body;
+    const { spaceId, spaceTitle, name, phone, email, city, message, intent } = req.body;
     if (!name || !phone) {
       return res.status(400).json({ success: false, message: 'name and phone are required' });
     }
     const inquiry = await SalonSpaceInquiry.create({
-      spaceId, spaceTitle, name, phone, email, city, message,
+      spaceId, spaceTitle, name, phone, email, city, message, intent,
       user: req.user?._id || req.user?.id || null,
     });
     res.status(201).json({ success: true, data: inquiry });
+    const intentLabel = { rent: 'Rent', lease: 'Lease', buy: 'Buy', just_looking: 'Just looking' }[intent] || '';
     require('../services/whatsappNotify').sendWhatsAppAlert(
-      `📩 New Salon Space inquiry\n${name}${spaceTitle ? ` · ${spaceTitle}` : ''}\n📞 ${phone}`
+      `📩 New Salon Space inquiry\n${name}${spaceTitle ? ` · ${spaceTitle}` : ''}${intentLabel ? ` · Wants: ${intentLabel}` : ''}\n📞 ${phone}`
     ).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

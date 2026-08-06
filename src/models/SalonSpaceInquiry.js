@@ -8,6 +8,9 @@ const salonSpaceInquirySchema = new mongoose.Schema({
   email:   { type: String, trim: true, default: '' },
   city:    { type: String, trim: true, default: '' },
   message: { type: String, trim: true, default: '' },
+  // What the enquirer actually wants — lets admin triage at a glance
+  // instead of having to read the free-text message for intent.
+  intent:  { type: String, enum: ['rent', 'lease', 'buy', 'just_looking'], default: 'rent' },
   status:  { type: String, enum: ['new', 'contacted', 'closed'], default: 'new' },
   adminNote: { type: String, default: '' },
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

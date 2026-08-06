@@ -209,17 +209,17 @@ router.delete('/listings/:id', protect, authorize('admin', 'superadmin'), async 
 // POST /franchise/inquiries — authenticated users
 router.post('/inquiries', protect, async (req, res) => {
   try {
-    const { franchiseId, franchiseName, name, phone, email, city, message } = req.body;
+    const { franchiseId, franchiseName, name, phone, email, city, message, budget, timeline } = req.body;
     if (!name || !phone) {
       return res.status(400).json({ success: false, message: 'name and phone are required' });
     }
     const inquiry = await FranchiseInquiry.create({
-      franchiseId, franchiseName, name, phone, email, city, message,
+      franchiseId, franchiseName, name, phone, email, city, message, budget, timeline,
       user: req.user?._id || req.user?.id || null,
     });
     res.status(201).json({ success: true, data: inquiry });
     require('../services/whatsappNotify').sendWhatsAppAlert(
-      `📩 New Franchise inquiry\n${name}${franchiseName ? ` · ${franchiseName}` : ''}\n📞 ${phone}`
+      `📩 New Franchise inquiry\n${name}${franchiseName ? ` · ${franchiseName}` : ''}${budget ? ` · Budget: ${budget}` : ''}${timeline ? ` · Timeline: ${timeline}` : ''}\n📞 ${phone}`
     ).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
