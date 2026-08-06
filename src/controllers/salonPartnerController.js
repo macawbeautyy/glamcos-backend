@@ -169,6 +169,18 @@ exports.updateStatus = async (req, res) => {
     const partner = await SalonPartner.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!partner) return res.status(404).json({ message: 'Application not found.' });
     res.json({ message: `Application ${status}.`, partner });
+
+    // Notify the applicant — only possible if they applied while logged in
+    // (userId is optional on apply(), so guest/unauthenticated submissions
+    // have no account to push a notification to).
+    if (partner.userId) {
+      const { Notif } = require('../services/notifications');
+      if (status === 'approved') {
+        Notif.salonPartnerApproved(partner.userId, { salonName: partner.salonName }).catch(() => {});
+      } else if (status === 'rejected') {
+        Notif.salonPartnerRejected(partner.userId, { salonName: partner.salonName, reason: adminNote }).catch(() => {});
+      }
+    }
   } catch (err) {
     console.error('updateStatus error:', err);
     res.status(500).json({ message: 'Server error.' });

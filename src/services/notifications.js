@@ -279,6 +279,13 @@ const Notif = {
   salonAppointmentCancelled: (ownerUserId, { userName, service, date, timeSlot }) =>
     sendToUser(ownerUserId, { title: `Booking Cancelled`, body: `${userName}'s ${service} on ${date} at ${timeSlot} was cancelled.`, data: { screen: 'SalonDashboard' }, channel: CH.BOOKINGS, prefKey: 'booking_alerts' }),
 
+  // SALON PARTNER PROGRAM
+  salonPartnerApproved: (userId, { salonName } = {}) =>
+    sendToUser(userId, { title: `You're a Macaw Salon Partner! 🎉`, body: `${salonName || 'Your salon'} has been approved — you're now live on the app and ready to receive bookings.`, data: { screen: 'SalonDashboard' }, channel: CH.PROVIDER, priority: 'high' }),
+
+  salonPartnerRejected: (userId, { salonName, reason } = {}) =>
+    sendToUser(userId, { title: `Application Update`, body: `${salonName || 'Your salon'} application needs a look${reason ? `: ${reason}` : '.'} Update your details and resubmit.`, data: { screen: 'SalonPartner' }, channel: CH.PROVIDER }),
+
   // PROVIDER
   newBookingRequest: (providerId, { bookingId, serviceName, userFirstName, date }) =>
     sendToUser(providerId, { title: `New Booking Request 📅`, body: `${userFirstName} booked ${serviceName} on ${date}. Tap to accept.`, data: { screen: 'ProviderBookings', bookingId }, channel: CH.PROVIDER, priority: 'high', sound: 'new_order.wav', prefKey: 'provider_alerts' }),
