@@ -553,6 +553,9 @@ exports.adminApproveSeller = async (req, res) => {
     await User.findByIdAndUpdate(profile.user._id, { role: 'vendor' });
 
     res.json({ success: true, message: 'Seller approved. User role upgraded to vendor.', data: profile });
+
+    const { Notif } = require('../services/notifications');
+    Notif.sellerAccountApproved(profile.user._id, { shopName: profile.businessName }).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -576,6 +579,9 @@ exports.adminRejectSeller = async (req, res) => {
     await User.findByIdAndUpdate(profile.user, { role: 'user' });
 
     res.json({ success: true, message: 'Seller rejected', data: profile });
+
+    const { Notif } = require('../services/notifications');
+    Notif.sellerAccountRejected(profile.user, { shopName: profile.businessName, reason }).catch(() => {});
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -603,6 +609,13 @@ exports.adminUpdateSellerStatus = async (req, res) => {
     }
 
     res.json({ success: true, data: profile });
+
+    const { Notif } = require('../services/notifications');
+    if (status === 'suspended') {
+      Notif.sellerAccountSuspended(profile.user, { shopName: profile.businessName, reason }).catch(() => {});
+    } else if (status === 'approved') {
+      Notif.sellerAccountReinstated(profile.user, { shopName: profile.businessName }).catch(() => {});
+    }
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

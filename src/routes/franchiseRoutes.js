@@ -147,6 +147,15 @@ router.patch('/listings/:id/status', protect, authorize('admin', 'superadmin'), 
     );
     if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
     res.json({ success: true, data: listing });
+
+    if (listing.owner) {
+      const { Notif } = require('../services/notifications');
+      if (status === 'approved') {
+        Notif.franchiseListingApproved(listing.owner, { businessName: listing.franchiseName }).catch(() => {});
+      } else if (status === 'rejected') {
+        Notif.franchiseListingRejected(listing.owner, { businessName: listing.franchiseName, reason: adminNote }).catch(() => {});
+      }
+    }
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -248,6 +257,11 @@ router.patch('/inquiries/:id', protect, authorize('admin', 'superadmin'), async 
       { new: true }
     );
     res.json({ success: true, data: inquiry });
+
+    if (inquiry?.user && status) {
+      const { Notif } = require('../services/notifications');
+      Notif.inquiryStatusUpdated(inquiry.user, { subject: inquiry.franchiseName, status }).catch(() => {});
+    }
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

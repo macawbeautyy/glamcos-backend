@@ -412,6 +412,14 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
   app.updatedAt = new Date();
   await job.save();
 
+  if (app.applicant) {
+    const { Notif } = require('../services/notifications');
+    const payload = { jobTitle: job.title, companyName: job.companyName };
+    if (status === 'shortlisted') Notif.jobApplicationShortlisted(app.applicant, payload).catch(() => {});
+    else if (status === 'rejected') Notif.jobApplicationRejected(app.applicant, payload).catch(() => {});
+    else if (status === 'hired') Notif.jobApplicationHired(app.applicant, payload).catch(() => {});
+  }
+
   return ApiResponse.success(res, { data: app, message: 'Application status updated' });
 });
 

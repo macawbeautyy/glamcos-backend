@@ -383,18 +383,22 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     }
   } catch (_) { /* wallet errors must never block fulfilment */ }
 
-  // Fire shipped/delivered notifications (non-blocking)
+  // Fire status-change notifications (non-blocking)
+  const orderNotifPayload = { orderId: order._id, orderNumber: order.orderNumber };
   if (order.status === 'shipped') {
-    Notif.orderShipped(order.user, {
-      orderId:     order._id,
-      orderNumber: order.orderNumber,
-      trackingId:  trackingNumber || null,
-    }).catch(() => {});
+    Notif.orderShipped(order.user, { ...orderNotifPayload, trackingId: trackingNumber || null }).catch(() => {});
   } else if (order.status === 'delivered') {
-    Notif.orderDelivered(order.user, {
-      orderId:     order._id,
-      orderNumber: order.orderNumber,
-    }).catch(() => {});
+    Notif.orderDelivered(order.user, orderNotifPayload).catch(() => {});
+  } else if (order.status === 'confirmed') {
+    Notif.orderConfirmed(order.user, orderNotifPayload).catch(() => {});
+  } else if (order.status === 'processing') {
+    Notif.orderProcessing(order.user, orderNotifPayload).catch(() => {});
+  } else if (order.status === 'cancelled') {
+    Notif.orderCancelled(order.user, orderNotifPayload).catch(() => {});
+  } else if (order.status === 'returned') {
+    Notif.orderReturned(order.user, orderNotifPayload).catch(() => {});
+  } else if (order.status === 'refunded') {
+    Notif.orderRefunded(order.user, { ...orderNotifPayload, amount: order.total }).catch(() => {});
   }
 
   return ApiResponse.success(res, {

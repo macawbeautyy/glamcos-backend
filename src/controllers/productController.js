@@ -364,6 +364,11 @@ const approveProduct = asyncHandler(async (req, res) => {
     throw ApiError.badRequest(`Cannot approve a product with status '${existing.status}'`);
   }
 
+  if (product.seller) {
+    const { Notif } = require('../services/notifications');
+    Notif.productApproved(product.seller, { productName: product.name }).catch(() => {});
+  }
+
   return ApiResponse.success(res, {
     data: product,
     message: 'Product approved successfully',
@@ -392,6 +397,11 @@ const rejectProduct = asyncHandler(async (req, res) => {
     const existing = await Product.findById(req.params.id).select('status');
     if (!existing) throw ApiError.notFound('Product not found');
     throw ApiError.badRequest(`Cannot reject a product with status '${existing.status}'`);
+  }
+
+  if (product.seller) {
+    const { Notif } = require('../services/notifications');
+    Notif.productRejected(product.seller, { productName: product.name, reason }).catch(() => {});
   }
 
   return ApiResponse.success(res, {

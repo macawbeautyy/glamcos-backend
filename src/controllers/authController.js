@@ -485,7 +485,7 @@ const getAllUsers = asyncHandler(async (req, res) => {
  * @access  Admin
  */
 const updateUserStatus = asyncHandler(async (req, res) => {
-  const { status } = req.body;
+  const { status, reason } = req.body;
   const allowed = ['active', 'inactive', 'suspended', 'banned'];
 
   if (!allowed.includes(status)) {
@@ -503,6 +503,11 @@ const updateUserStatus = asyncHandler(async (req, res) => {
   ).select('-password -refreshToken');
 
   if (!user) throw ApiError.notFound('User not found');
+
+  const { Notif } = require('../services/notifications');
+  if (status === 'suspended') Notif.accountSuspended(user._id, { reason }).catch(() => {});
+  else if (status === 'banned') Notif.accountBanned(user._id, { reason }).catch(() => {});
+  else if (status === 'active') Notif.accountReactivated(user._id).catch(() => {});
 
   return ApiResponse.success(res, {
     data: { user: sanitizeUser(user) },

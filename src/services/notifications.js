@@ -319,6 +319,77 @@ const Notif = {
 
   abandonedBookingReminder: (userId, { serviceName }) =>
     sendToUser(userId, { title: `Complete your booking 💄`, body: `Your ${serviceName} booking is waiting. Slots fill up fast!`, data: { screen: 'Home' }, channel: CH.BOOKINGS, prefKey: 'reminders' }),
+
+  // FRANCHISE LISTINGS
+  franchiseListingApproved: (userId, { businessName } = {}) =>
+    sendToUser(userId, { title: `Franchise Listing Approved ✅`, body: `${businessName || 'Your franchise listing'} is now live and visible to interested buyers.`, data: { screen: 'MyFranchiseListings' }, channel: CH.DEFAULT }),
+
+  franchiseListingRejected: (userId, { businessName, reason } = {}) =>
+    sendToUser(userId, { title: `Franchise Listing Update`, body: `${businessName || 'Your franchise listing'} needs a look${reason ? `: ${reason}` : '.'} Update and resubmit.`, data: { screen: 'MyFranchiseListings' }, channel: CH.DEFAULT }),
+
+  // SALON SPACE LISTINGS
+  salonSpaceListingApproved: (userId, { title: spaceTitle } = {}) =>
+    sendToUser(userId, { title: `Salon Space Listing Approved ✅`, body: `${spaceTitle || 'Your salon space listing'} is now live and visible to interested renters.`, data: { screen: 'MySalonSpaceListings' }, channel: CH.DEFAULT }),
+
+  salonSpaceListingRejected: (userId, { title: spaceTitle, reason } = {}) =>
+    sendToUser(userId, { title: `Salon Space Listing Update`, body: `${spaceTitle || 'Your salon space listing'} needs a look${reason ? `: ${reason}` : '.'} Update and resubmit.`, data: { screen: 'MySalonSpaceListings' }, channel: CH.DEFAULT }),
+
+  // FRANCHISE / SALON SPACE INQUIRIES
+  inquiryStatusUpdated: (userId, { subject, status } = {}) =>
+    sendToUser(userId, { title: `Inquiry Update`, body: `Your inquiry${subject ? ` about ${subject}` : ''} is now marked as ${status || 'updated'}.`, data: { screen: 'Home' }, channel: CH.DEFAULT }),
+
+  // MARKETPLACE — PRODUCTS
+  productApproved: (sellerUserId, { productName } = {}) =>
+    sendToUser(sellerUserId, { title: `Product Approved ✅`, body: `${productName || 'Your product'} is now live in the marketplace.`, data: { screen: 'SellerDashboard' }, channel: CH.DEFAULT }),
+
+  productRejected: (sellerUserId, { productName, reason } = {}) =>
+    sendToUser(sellerUserId, { title: `Product Needs Attention`, body: `${productName || 'Your product'} was rejected.${reason ? ` Reason: ${reason}` : ''}`, data: { screen: 'SellerDashboard' }, channel: CH.DEFAULT }),
+
+  // MARKETPLACE — SELLER ACCOUNT
+  sellerAccountApproved: (sellerUserId, { shopName } = {}) =>
+    sendToUser(sellerUserId, { title: `Seller Account Approved 🎉`, body: `${shopName || 'Your shop'} is approved — you can start listing products now.`, data: { screen: 'SellerDashboard' }, channel: CH.DEFAULT }),
+
+  sellerAccountRejected: (sellerUserId, { shopName, reason } = {}) =>
+    sendToUser(sellerUserId, { title: `Seller Application Update`, body: `${shopName || 'Your seller application'} needs a look${reason ? `: ${reason}` : '.'} Update your details and resubmit.`, data: { screen: 'SellerRegistration' }, channel: CH.DEFAULT }),
+
+  sellerAccountSuspended: (sellerUserId, { shopName, reason } = {}) =>
+    sendToUser(sellerUserId, { title: `Seller Account Suspended`, body: `${shopName || 'Your seller account'} has been suspended.${reason ? ` Reason: ${reason}` : ''} Contact support for help.`, data: { screen: 'SellerDashboard' }, channel: CH.DEFAULT }),
+
+  sellerAccountReinstated: (sellerUserId, { shopName } = {}) =>
+    sendToUser(sellerUserId, { title: `Seller Account Reinstated ✅`, body: `${shopName || 'Your seller account'} is active again.`, data: { screen: 'SellerDashboard' }, channel: CH.DEFAULT }),
+
+  // ORDERS — ADMIN STATUS CHANGES (beyond shipped/delivered which already exist)
+  orderConfirmed: (userId, { orderId, orderNumber } = {}) =>
+    sendToUser(userId, { title: `Order Confirmed ✅`, body: `Order #${orderNumber} has been confirmed and is being prepared.`, data: { screen: 'OrderDetail', orderId }, channel: CH.ORDERS, prefKey: 'order_alerts' }),
+
+  orderProcessing: (userId, { orderId, orderNumber } = {}) =>
+    sendToUser(userId, { title: `Order Processing 🔄`, body: `Order #${orderNumber} is being processed.`, data: { screen: 'OrderDetail', orderId }, channel: CH.ORDERS, prefKey: 'order_alerts' }),
+
+  orderReturned: (userId, { orderId, orderNumber } = {}) =>
+    sendToUser(userId, { title: `Order Returned`, body: `Order #${orderNumber} has been marked as returned.`, data: { screen: 'OrderDetail', orderId }, channel: CH.ORDERS, prefKey: 'order_alerts' }),
+
+  orderRefunded: (userId, { orderId, orderNumber, amount } = {}) =>
+    sendToUser(userId, { title: `Order Refunded 💰`, body: `Order #${orderNumber} refunded${amount ? ` — ₹${amount}` : ''}. Allow 3–5 business days.`, data: { screen: 'OrderDetail', orderId }, channel: CH.PAYMENTS, prefKey: 'payment_alerts' }),
+
+  // JOB APPLICATIONS
+  jobApplicationShortlisted: (userId, { jobTitle, companyName } = {}) =>
+    sendToUser(userId, { title: `You've Been Shortlisted! 🎉`, body: `${companyName || 'An employer'} shortlisted your application for ${jobTitle || 'a job'}.`, data: { screen: 'JobApplications' }, channel: CH.DEFAULT }),
+
+  jobApplicationRejected: (userId, { jobTitle, companyName } = {}) =>
+    sendToUser(userId, { title: `Application Update`, body: `${companyName || 'The employer'} has updated your application for ${jobTitle || 'a job'}.`, data: { screen: 'JobApplications' }, channel: CH.DEFAULT }),
+
+  jobApplicationHired: (userId, { jobTitle, companyName } = {}) =>
+    sendToUser(userId, { title: `Congratulations, you're hired! 🎊`, body: `${companyName || 'The employer'} selected you for ${jobTitle || 'the position'}.`, data: { screen: 'JobApplications' }, channel: CH.DEFAULT, priority: 'high' }),
+
+  // USER ACCOUNT STATUS
+  accountSuspended: (userId, { reason } = {}) =>
+    sendToUser(userId, { title: `Account Suspended`, body: `Your account has been suspended.${reason ? ` Reason: ${reason}` : ''} Contact support if you think this is a mistake.`, data: { screen: 'Home' }, channel: CH.DEFAULT }),
+
+  accountBanned: (userId, { reason } = {}) =>
+    sendToUser(userId, { title: `Account Banned`, body: `Your account has been banned.${reason ? ` Reason: ${reason}` : ''} Contact support for details.`, data: { screen: 'Home' }, channel: CH.DEFAULT }),
+
+  accountReactivated: (userId) =>
+    sendToUser(userId, { title: `Account Reactivated ✅`, body: `Your account is active again. Welcome back!`, data: { screen: 'Home' }, channel: CH.DEFAULT }),
 };
 
 module.exports = {
