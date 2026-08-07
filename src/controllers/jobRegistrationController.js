@@ -3,6 +3,7 @@ const JobSeekerProfile  = require('../models/JobSeekerProfile');
 const SubscriptionPlan  = require('../models/SubscriptionPlan');
 const Job               = require('../models/Job');
 const CandidateContact  = require('../models/CandidateContact');
+const ProfileView       = require('../models/ProfileView');
 const crypto            = require('crypto');
 const mongoose          = require('mongoose');
 
@@ -158,6 +159,69 @@ const upsertSeekerProfile = asyncHandler(async (req, res) => {
 const getMySeekerProfile = asyncHandler(async (req, res) => {
   const profile = await JobSeekerProfile.findOne({ user: userId(req) });
   return ApiResponse.success(res, { data: profile });
+});
+
+/**
+ * Seeker: profile insights for the candidate dashboard.
+ *
+ * Every number here is derived from real recruiter activity — there are no
+ * synthetic/estimated values:
+ *   profileViews       distinct approved employers who opened the full profile
+ *   searchAppearances  distinct approved employers whose search surfaced it
+ *   recruiterSaves     CandidateContact rows with action 'shortlist'
+ *   profileRank        rank by 30-day views among published+approved peers
+ *                      sharing the candidate's primary specialization
+ *
+ * A candidate with no profile yet gets zeros rather than a 404, so the
+ * dashboard can render before onboarding is finished.
+ */
+const getSeekerInsights = asyncHandler(async (req, res) => {
+  const profile = await JobSeekerProfile.findOne({ user: userId(req) });
+  if (!profile) {
+    return ApiResponse.success(res, {
+      data: { profileViews: 0, searchAppearances: 0, recruiterSaves: 0, profileRank: null, categoryTotal: 0, windowDays: 30 },
+      message: 'No seeker profile yet',
+    });
+  }
+
+  const windowDays = 30;
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+  const [profileViews, searchAppearances, recruiterSaves] = await Promise.all([
+    ProfileView.countDocuments({ seekerProfile: profile._id, kind: 'view',   createdAt: { $gte: since } }),
+    ProfileView.countDocuments({ seekerProfile: profile._id, kind: 'search', createdAt: { $gte: since } }),
+    CandidateContact.countDocuments({ seekerProfile: profile._id, action: 'shortlist' }),
+  ]);
+
+  // Rank within the candidate's primary specialization. Only meaningful once
+  // the profile is live to employers, so unpublished profiles get null.
+  let profileRank = null;
+  let categoryTotal = 0;
+  const primary = (profile.specializations || [])[0];
+  if (primary && profile.isPublished && profile.status === 'approved') {
+    const peers = await JobSeekerProfile
+      .find({ specializations: primary, status: 'approved', isPublished: true })
+      .select('_id');
+    categoryTotal = peers.length;
+
+    if (categoryTotal > 1) {
+      const peerIds = peers.map((p) => p._id);
+      const counts = await ProfileView.aggregate([
+        { $match: { seekerProfile: { $in: peerIds }, kind: 'view', createdAt: { $gte: since } } },
+        { $group: { _id: '$seekerProfile', n: { $sum: 1 } } },
+      ]);
+      const byId = new Map(counts.map((c) => [String(c._id), c.n]));
+      const mine = byId.get(String(profile._id)) || 0;
+      // Rank = how many peers are strictly ahead, +1.
+      const ahead = peerIds.reduce((acc, id) => acc + ((byId.get(String(id)) || 0) > mine ? 1 : 0), 0);
+      profileRank = ahead + 1;
+    }
+  }
+
+  return ApiResponse.success(res, {
+    data: { profileViews, searchAppearances, recruiterSaves, profileRank, categoryTotal, windowDays },
+    message: 'Profile insights',
+  });
 });
 
 /**
@@ -362,6 +426,48 @@ async function requireApprovedEmployer(req) {
   return employer;
 }
 
+/**
+ * Record profile views for candidate insights.
+ *
+ * ONLY call this from endpoints already behind `requireApprovedEmployer` —
+ * that's what guarantees a stat is only counted when a real, admin-approved
+ * hiring company/person looked at the profile.
+ *
+ * Fire-and-forget on purpose: analytics must never fail or slow down the
+ * employer's request. Duplicate-key errors (code 11000) are the expected
+ * "already counted today" path and are swallowed.
+ *
+ * @param {Array<{_id, user}>} profiles  candidate profiles that were seen
+ * @param {'view'|'search'} kind
+ */
+async function recordProfileViews(profiles, { employerUserId, employerProfileId, kind }) {
+  try {
+    const list = (Array.isArray(profiles) ? profiles : [profiles]).filter(Boolean);
+    if (!list.length || !employerUserId) return;
+
+    const dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const rows = list
+      // Never count an employer viewing their own linked seeker profile.
+      .filter((p) => String(p.user?._id || p.user || '') !== String(employerUserId))
+      .map((p) => ({
+        seekerProfile: p._id,
+        seeker: p.user?._id || p.user || undefined,
+        employer: employerUserId,
+        employerProfile: employerProfileId,
+        kind,
+        dayKey,
+      }));
+    if (!rows.length) return;
+
+    // ordered:false → one duplicate doesn't abort the rest of the batch.
+    await ProfileView.insertMany(rows, { ordered: false });
+  } catch (err) {
+    if (err?.code !== 11000 && !err?.writeErrors) {
+      console.warn('[recordProfileViews] skipped:', err.message);
+    }
+  }
+}
+
 /** Employer: browse approved candidate profiles (contact details masked unless subscribed) */
 const getCandidates = asyncHandler(async (req, res) => {
   const employer = await requireApprovedEmployer(req);
@@ -416,6 +522,14 @@ const getCandidates = asyncHandler(async (req, res) => {
       shortlisted: shortlistedSet.has(String(pr._id)),
     })
   );
+
+  // Surfacing in an approved employer's browse/search results counts as a
+  // "Search Appearance" — weaker than a profile view, tracked separately.
+  recordProfileViews(profiles, {
+    employerUserId: userId(req),
+    employerProfileId: employer._id,
+    kind: 'search',
+  });
 
   return res.json({
     success: true,
@@ -488,6 +602,15 @@ const getCandidateById = asyncHandler(async (req, res) => {
   const contacts = await CandidateContact.find({ employer: userId(req), seekerProfile: profile._id }).select('action');
   const unlocked = contacts.some((c) => c.action === 'unlock' || c.action === 'hire');
   const shortlisted = contacts.some((c) => c.action === 'shortlist');
+
+  // Counts toward the candidate's "Profile Views" — we're past
+  // requireApprovedEmployer, so this is a genuine approved-recruiter view.
+  recordProfileViews(profile, {
+    employerUserId: userId(req),
+    employerProfileId: employer._id,
+    kind: 'view',
+  });
+
   return ApiResponse.success(res, {
     data: presentCandidate(profile, { unlocked, shortlisted }),
     message: 'Candidate',
@@ -1123,7 +1246,7 @@ module.exports = {
   getMyCandidateContacts,
   adminReviewSeeker,
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
-  upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV,
+  upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV, getSeekerInsights,
   getPlans, subscribeToPlan,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,

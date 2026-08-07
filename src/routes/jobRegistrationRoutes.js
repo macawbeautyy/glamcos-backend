@@ -4,7 +4,7 @@ const router  = express.Router();
 const { protect, authorize } = require('../middleware/auth');
 const {
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
-  upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV,
+  upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV, getSeekerInsights,
   getPlans, subscribeToPlan,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
@@ -34,6 +34,7 @@ router.put('/employer/me',           protect, updateEmployerProfile);
 // ── Seeker ────────────────────────────────────────────────────────────────────
 router.post('/seeker/profile',       protect, upsertSeekerProfile);
 router.get('/seeker/me',             protect, getMySeekerProfile);
+router.get('/seeker/insights',       protect, getSeekerInsights);
 
 // CV file upload: images (photo/scan of CV) or PDF/DOC/DOCX, max 10 MB
 const cvUpload = multer({
