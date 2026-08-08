@@ -310,6 +310,74 @@ const getMyApplications = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: applications, message: 'Applications fetched' });
 });
 
+/**
+ * Candidate: withdraw their own application.
+ *
+ * Keeps the record (so the employer sees it was withdrawn rather than having
+ * it silently vanish mid-conversation) and just flips the status. Refuses once
+ * the employer has already hired, since that's no longer the candidate's call.
+ */
+const withdrawApplication = asyncHandler(async (req, res) => {
+  const uid = req.user?._id?.toString() || req.user?.id;
+  const { applicationId } = req.params;
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const app = job.applications.id(applicationId);
+  if (!app) throw ApiError.notFound('Application not found');
+  // Only the applicant may withdraw — never the employer or a passer-by.
+  if (String(app.applicant) !== String(uid)) {
+    throw ApiError.forbidden('You can only withdraw your own application');
+  }
+  if (app.status === 'hired') {
+    throw ApiError.badRequest('You have already been hired for this role — contact the employer directly');
+  }
+  if (app.status === 'withdrawn') {
+    return ApiResponse.success(res, { data: { _id: app._id, status: 'withdrawn' }, message: 'Already withdrawn' });
+  }
+
+  app.status = 'withdrawn';
+  app.withdrawnAt = new Date();
+  app.updatedAt = new Date();
+  // Withdrawn applications shouldn't inflate the employer's applicant count.
+  job.applicationCount = Math.max(0, (job.applicationCount || 1) - 1);
+  await job.save();
+
+  return ApiResponse.success(res, {
+    data: { _id: app._id, status: app.status },
+    message: 'Application withdrawn',
+  });
+});
+
+/**
+ * Candidate: permanently remove their application record.
+ *
+ * Only allowed once it's already withdrawn or rejected — deleting an active
+ * application would erase it from the employer's pipeline without warning.
+ */
+const deleteApplication = asyncHandler(async (req, res) => {
+  const uid = req.user?._id?.toString() || req.user?.id;
+  const { applicationId } = req.params;
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const app = job.applications.id(applicationId);
+  if (!app) throw ApiError.notFound('Application not found');
+  if (String(app.applicant) !== String(uid)) {
+    throw ApiError.forbidden('You can only delete your own application');
+  }
+  if (!['withdrawn', 'rejected'].includes(app.status)) {
+    throw ApiError.badRequest('Withdraw the application before deleting it');
+  }
+
+  app.deleteOne();
+  await job.save();
+
+  return ApiResponse.success(res, { data: { _id: applicationId }, message: 'Application deleted' });
+});
+
 // ── Get my job listings (as employer) ─────────────────────────────────────────
 const getMyListings = asyncHandler(async (req, res) => {
   const userId = req.user?._id?.toString() || req.user?.id;
@@ -610,6 +678,8 @@ module.exports = {
   boostJob,
   applyForJob,
   getMyApplications,
+  withdrawApplication,
+  deleteApplication,
   getMyListings,
   getJobApplications,
   getAllApplications,

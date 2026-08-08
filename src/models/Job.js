@@ -12,9 +12,11 @@ const ApplicationSchema = new mongoose.Schema({
   experience:     { type: String, default: '' },
   status: {
     type: String,
-    enum: ['applied', 'shortlisted', 'rejected', 'hired'],
+    // 'withdrawn' is candidate-initiated; the rest are employer-initiated.
+    enum: ['applied', 'shortlisted', 'rejected', 'hired', 'withdrawn'],
     default: 'applied',
   },
+  withdrawnAt: { type: Date },
   appliedAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 }, { _id: true });

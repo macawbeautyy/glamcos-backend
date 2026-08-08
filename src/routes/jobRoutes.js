@@ -10,6 +10,8 @@ const {
   boostJob,
   applyForJob,
   getMyApplications,
+  withdrawApplication,
+  deleteApplication,
   getMyListings,
   getJobApplications,
   getAllApplications,
@@ -30,6 +32,9 @@ router.post('/admin', protect, authorize('admin', 'superadmin'), adminCreateJob)
 
 // ── Seeker routes ─────────────────────────────────────────────────────────────
 router.get('/applications/my', protect, getMyApplications);
+// Candidate-owned actions on their own application (ownership checked in controller)
+router.patch('/applications/:applicationId/withdraw', protect, withdrawApplication);
+router.delete('/applications/:applicationId',         protect, deleteApplication);
 
 // ── Employer static routes ────────────────────────────────────────────────────
 router.post('/', protect, postJob);
