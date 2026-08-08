@@ -286,37 +286,62 @@ const uploadSeekerCV = asyncHandler(async (req, res) => {
 //  SUBSCRIPTION PLANS
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Phase 2 monetization plan definitions — displayed as Free / Professional /
+// Business. planKey values stay 'free'/'basic'/'premium' (see EmployerProfile
+// comment) to avoid a data migration; only labels/limits/features changed.
+const PLAN_DEFS = [
+  {
+    planKey: 'free', name: 'Free', price: 0, durationDays: 365,
+    maxListings: 2, featuredListings: 0, urgentListings: 0,
+    candidateSearch: false, unlimitedApplicants: false, interviewScheduling: false,
+    verifiedBadge: false, hiringAnalytics: false, prioritySupport: false,
+    multiRecruiter: false, multiBranch: false, bulkHiring: false, dedicatedSupport: false,
+    highlights: ['2 active job listings', 'Basic company profile', 'Limited applicant visibility', 'Limited candidate search'],
+    sortOrder: 0,
+  },
+  {
+    planKey: 'basic', name: 'Professional', price: 999, durationDays: 90,
+    maxListings: -1, featuredListings: 1, urgentListings: 2,
+    candidateSearch: true, unlimitedApplicants: true, interviewScheduling: true,
+    verifiedBadge: true, hiringAnalytics: true, prioritySupport: true,
+    multiRecruiter: false, multiBranch: false, bulkHiring: false, dedicatedSupport: false,
+    highlights: ['Unlimited job listings', 'Unlimited applicants', 'Candidate search', 'Interview scheduling', 'Verified recruiter badge', 'Featured company eligibility', 'Hiring analytics', 'Priority support'],
+    sortOrder: 1,
+  },
+  {
+    planKey: 'premium', name: 'Business', price: 2499, durationDays: 90,
+    maxListings: -1, featuredListings: 5, urgentListings: 10,
+    candidateSearch: true, unlimitedApplicants: true, interviewScheduling: true,
+    verifiedBadge: true, hiringAnalytics: true, prioritySupport: true,
+    multiRecruiter: true, multiBranch: true, bulkHiring: true, dedicatedSupport: true,
+    highlights: ['Everything in Professional', 'Multiple recruiters', 'Multiple branches', 'Advanced analytics', 'Bulk hiring', 'Team members', 'Dedicated support'],
+    sortOrder: 2,
+  },
+];
+
 /** Get all active plans */
 const getPlans = asyncHandler(async (req, res) => {
   let plans = await SubscriptionPlan.find({ isActive: true }).sort({ sortOrder: 1 });
 
-  // Seed defaults if none exist
-  if (plans.length === 0) {
-    await SubscriptionPlan.insertMany([
-      {
-        planKey: 'free', name: 'Free', price: 0, durationDays: 365,
-        maxListings: 1, featuredListings: 0, urgentListings: 0,
-        highlights: ['1 active job listing', 'Basic visibility', 'Email support'],
-        sortOrder: 0,
-      },
-      {
-        planKey: 'basic', name: 'Basic', price: 999, durationDays: 90,
-        maxListings: 5, featuredListings: 1, urgentListings: 2,
-        highlights: ['5 active job listings', '1 Featured listing', '2 Urgent listings', 'Priority support'],
-        sortOrder: 1,
-      },
-      {
-        planKey: 'premium', name: 'Premium', price: 2499, durationDays: 90,
-        maxListings: 20, featuredListings: 5, urgentListings: 10,
-        highlights: ['20 active job listings', '5 Featured listings', '10 Urgent listings', 'Dedicated support', 'Analytics dashboard'],
-        sortOrder: 2,
-      },
-    ]);
+  // Upsert so an already-seeded deployment picks up limit/feature changes on
+  // redeploy too, not just a genuinely-empty collection.
+  if (plans.length === 0 || plans.length < PLAN_DEFS.length) {
+    await Promise.all(PLAN_DEFS.map((def) =>
+      SubscriptionPlan.updateOne({ planKey: def.planKey }, { $set: def }, { upsert: true })
+    ));
     plans = await SubscriptionPlan.find({ isActive: true }).sort({ sortOrder: 1 });
   }
 
   return ApiResponse.success(res, { data: plans });
 });
+
+/** Resolve the calling employer's active plan doc (falls back to 'free' definition if unseeded). */
+async function getEmployerPlanDoc(employer) {
+  const planKey = employer?.subscriptionPlan || 'free';
+  const isActive = hasActiveSubscription(employer);
+  const plan = await SubscriptionPlan.findOne({ planKey: isActive ? planKey : 'free' });
+  return plan || PLAN_DEFS.find((p) => p.planKey === (isActive ? planKey : 'free'));
+}
 
 /** Subscribe to a plan (records payment intent — actual payment handled externally) */
 const subscribeToPlan = asyncHandler(async (req, res) => {
@@ -341,6 +366,17 @@ const subscribeToPlan = asyncHandler(async (req, res) => {
   profile.subscriptionPaidAt    = new Date();
   profile.subscriptionAmount    = plan.price;
   await profile.save();
+
+  const JobsTransaction = require('../models/JobsTransaction');
+  await JobsTransaction.create({
+    employer: userId(req),
+    employerProfile: profile._id,
+    kind: 'subscription',
+    planKey: plan.planKey,
+    amount: 0,
+    status: 'paid',
+    description: `${plan.name} Plan (Free)`,
+  }).catch(() => {}); // history is best-effort — never block the subscription itself
 
   return ApiResponse.success(res, {
     data: profile,
@@ -472,15 +508,24 @@ async function recordProfileViews(profiles, { employerUserId, employerProfileId,
 const getCandidates = asyncHandler(async (req, res) => {
   const employer = await requireApprovedEmployer(req);
   const subscribed = hasActiveSubscription(employer);
+  const planDoc = await getEmployerPlanDoc(employer);
+  // "Limited Candidate Search" (Free) vs full Candidate Search (Professional/
+  // Business, per planDoc.candidateSearch): free-tier employers can still
+  // browse, but without text/skill search filters and a smaller page size —
+  // real search capability, not just masked contact info.
+  const canSearch = Boolean(planDoc?.candidateSearch);
 
   const { search, city, skill, page = 1, limit = 20, exclude, shortlistedOnly } = req.query;
+  const effectiveLimit = canSearch ? Math.min(50, parseInt(limit) || 20) : Math.min(5, parseInt(limit) || 5);
   // Employers see approved candidates that the candidate has PUBLISHED.
   const filter = { status: 'approved', isPublished: true };
-  if (city)  filter.currentCity = new RegExp(city, 'i');
-  if (skill) filter.skills = new RegExp(skill, 'i');
-  if (search) {
-    const rx = new RegExp(search, 'i');
-    filter.$or = [{ fullName: rx }, { title: rx }, { skills: rx }, { currentCity: rx }, { bio: rx }];
+  if (canSearch) {
+    if (city)  filter.currentCity = new RegExp(city, 'i');
+    if (skill) filter.skills = new RegExp(skill, 'i');
+    if (search) {
+      const rx = new RegExp(search, 'i');
+      filter.$or = [{ fullName: rx }, { title: rx }, { skills: rx }, { currentCity: rx }, { bio: rx }];
+    }
   }
 
   // Candidates this employer has already swiped on (accept/shortlist) are
@@ -506,13 +551,13 @@ const getCandidates = asyncHandler(async (req, res) => {
     if (seenSet.size) filter._id = { $nin: Array.from(seenSet) };
   }
 
-  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const skip = canSearch ? (parseInt(page) - 1) * effectiveLimit : 0; // free tier: no pagination, just the first page
   const [profiles, total] = await Promise.all([
     JobSeekerProfile.find(filter)
       .populate('user', 'email phone')
       .sort({ profileCompleteness: -1, updatedAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit)),
+      .limit(effectiveLimit),
     JobSeekerProfile.countDocuments(filter),
   ]);
 
@@ -535,7 +580,10 @@ const getCandidates = asyncHandler(async (req, res) => {
     success: true,
     data,
     total,
-    meta: { subscribed, plan: employer.subscriptionPlan, expiresAt: employer.subscriptionExpiresAt },
+    meta: {
+      subscribed, plan: employer.subscriptionPlan, expiresAt: employer.subscriptionExpiresAt,
+      canSearch, limited: !canSearch,
+    },
   });
 });
 
@@ -812,6 +860,18 @@ const createSubscriptionOrder = asyncHandler(async (req, res) => {
     notes: { type: 'job_subscription', planKey, userId: userId(req) },
   });
 
+  const JobsTransaction = require('../models/JobsTransaction');
+  await JobsTransaction.create({
+    employer: userId(req),
+    employerProfile: profile._id,
+    kind: 'subscription',
+    planKey: plan.planKey,
+    amount: plan.price,
+    status: 'created',
+    description: `${plan.name} Plan — ${plan.durationDays} days`,
+    razorpayOrderId: rzpOrder.id,
+  });
+
   return ApiResponse.success(res, {
     data: {
       razorpayOrderId: rzpOrder.id,
@@ -835,6 +895,14 @@ const verifySubscriptionPayment = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('planKey, razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
   }
 
+  const JobsTransaction = require('../models/JobsTransaction');
+  const txn = await JobsTransaction.findOne({ razorpayOrderId, employer: userId(req), kind: 'subscription' });
+  if (!txn) throw ApiError.notFound('Subscription order not found');
+  if (txn.status === 'paid') {
+    // Idempotent — client retried after this already succeeded.
+    return ApiResponse.success(res, { data: { plan: txn.planKey, expiresAt: txn.meta?.expiresAt, paymentId: txn.razorpayPaymentId }, message: 'Already activated' });
+  }
+
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
 
@@ -843,6 +911,9 @@ const verifySubscriptionPayment = asyncHandler(async (req, res) => {
     .update(`${razorpayOrderId}|${razorpayPaymentId}`)
     .digest('hex');
   if (expected !== razorpaySignature) {
+    txn.status = 'failed';
+    txn.failureReason = 'Signature mismatch';
+    await txn.save();
     throw ApiError.badRequest('Payment signature verification failed');
   }
 
@@ -852,12 +923,25 @@ const verifySubscriptionPayment = asyncHandler(async (req, res) => {
   const profile = await EmployerProfile.findOne({ user: userId(req) });
   if (!profile) throw ApiError.badRequest('Employer profile not found');
 
-  const expiresAt = new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000);
+  // Renewing before expiry extends the remaining time instead of discarding
+  // it — renewing the same plan a week early shouldn't cost you that week.
+  const now = new Date();
+  const base = profile.subscriptionExpiresAt && profile.subscriptionExpiresAt > now && profile.subscriptionPlan === plan.planKey
+    ? profile.subscriptionExpiresAt
+    : now;
+  const expiresAt = new Date(base.getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
   profile.subscriptionPlan      = plan.planKey;
   profile.subscriptionExpiresAt = expiresAt;
   profile.subscriptionPaidAt    = new Date();
   profile.subscriptionAmount    = plan.price;
+  profile.autoRenew             = true; // a fresh purchase implicitly re-enables renewal reminders
   await profile.save();
+
+  txn.status = 'paid';
+  txn.razorpayPaymentId = razorpayPaymentId;
+  txn.razorpaySignature = razorpaySignature;
+  txn.meta = { ...(txn.meta || {}), expiresAt };
+  await txn.save();
 
   return ApiResponse.success(res, {
     data: { plan: plan.planKey, expiresAt, paymentId: razorpayPaymentId },
@@ -894,6 +978,18 @@ const createBundleOrder = asyncHandler(async (req, res) => {
     notes: { type: 'unlock_bundle', qty: String(qty), employerId: userId(req) },
   });
 
+  const JobsTransaction = require('../models/JobsTransaction');
+  await JobsTransaction.create({
+    employer: userId(req),
+    employerProfile: employer._id,
+    kind: 'credit_bundle',
+    creditQty: qty,
+    amount: bundle.paise / 100,
+    status: 'created',
+    description: bundle.label,
+    razorpayOrderId: rzpOrder.id,
+  });
+
   return ApiResponse.success(res, {
     data: {
       razorpayOrderId: rzpOrder.id,
@@ -921,6 +1017,13 @@ const verifyBundlePayment = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('qty, razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
   }
 
+  const JobsTransaction = require('../models/JobsTransaction');
+  const txn = await JobsTransaction.findOne({ razorpayOrderId, employer: userId(req), kind: 'credit_bundle' });
+  if (!txn) throw ApiError.notFound('Bundle order not found');
+  if (txn.status === 'paid') {
+    return ApiResponse.success(res, { data: { unlockCredits: employer.unlockCredits, qty, paymentId: txn.razorpayPaymentId }, message: 'Already credited' });
+  }
+
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
 
@@ -928,15 +1031,223 @@ const verifyBundlePayment = asyncHandler(async (req, res) => {
     .createHmac('sha256', keySecret)
     .update(`${razorpayOrderId}|${razorpayPaymentId}`)
     .digest('hex');
-  if (expected !== razorpaySignature) throw ApiError.badRequest('Payment verification failed — signature mismatch');
+  if (expected !== razorpaySignature) {
+    txn.status = 'failed';
+    txn.failureReason = 'Signature mismatch';
+    await txn.save();
+    throw ApiError.badRequest('Payment verification failed — signature mismatch');
+  }
 
   // Add credits to employer wallet
   employer.unlockCredits = (employer.unlockCredits || 0) + qty;
   await employer.save();
 
+  txn.status = 'paid';
+  txn.razorpayPaymentId = razorpayPaymentId;
+  txn.razorpaySignature = razorpaySignature;
+  await txn.save();
+
   return ApiResponse.success(res, {
     data: { unlockCredits: employer.unlockCredits, qty, paymentId: razorpayPaymentId },
     message: `${qty} unlock credit(s) added to your account`,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  FEATURED COMPANY (one-time purchase, separate from per-job boosts)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const FEATURED_COMPANY_PRICES = { 7: 499, 15: 899, 30: 1499 }; // INR per duration in days
+
+/**
+ * @route POST /api/v1/job-registration/employer/featured/order
+ * @body  { days: 7 | 15 | 30 }
+ */
+const createFeaturedCompanyOrder = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const days = Number(req.body?.days);
+  const price = FEATURED_COMPANY_PRICES[days];
+  if (!price) throw ApiError.badRequest(`days must be one of: ${Object.keys(FEATURED_COMPANY_PRICES).join(', ')}`);
+
+  const client = getRazorpayClient();
+  const rzpOrder = await client.orders.create({
+    amount: price * 100,
+    currency: 'INR',
+    receipt: `FEAT-${Date.now().toString(36).toUpperCase()}`,
+    notes: { type: 'featured_company', days, employerId: userId(req) },
+  });
+
+  const JobsTransaction = require('../models/JobsTransaction');
+  await JobsTransaction.create({
+    employer: userId(req),
+    employerProfile: employer._id,
+    kind: 'featured_company',
+    featuredDurationDays: days,
+    amount: price,
+    status: 'created',
+    description: `Featured Company — ${days} Days`,
+    razorpayOrderId: rzpOrder.id,
+  });
+
+  return ApiResponse.success(res, {
+    data: { razorpayOrderId: rzpOrder.id, amount: rzpOrder.amount, currency: rzpOrder.currency, keyId: process.env.RAZORPAY_KEY_ID, days, price },
+    message: 'Featured Company order created',
+  });
+});
+
+/**
+ * @route POST /api/v1/job-registration/employer/featured/verify
+ * @body  { razorpayOrderId, razorpayPaymentId, razorpaySignature }
+ */
+const verifyFeaturedCompanyOrder = asyncHandler(async (req, res) => {
+  const employer = await requireApprovedEmployer(req);
+  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    throw ApiError.badRequest('razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
+  }
+
+  const JobsTransaction = require('../models/JobsTransaction');
+  const txn = await JobsTransaction.findOne({ razorpayOrderId, employer: userId(req), kind: 'featured_company' });
+  if (!txn) throw ApiError.notFound('Featured Company order not found');
+  if (txn.status === 'paid') {
+    return ApiResponse.success(res, { data: { isFeaturedCompany: true, featuredCompanyExpiresAt: employer.featuredCompanyExpiresAt }, message: 'Already featured' });
+  }
+
+  try {
+    require('../utils/razorpay').verifyRazorpaySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
+  } catch (e) {
+    txn.status = 'failed';
+    txn.failureReason = 'Signature mismatch';
+    await txn.save();
+    throw e;
+  }
+
+  const now = new Date();
+  const base = employer.isFeaturedCompany && employer.featuredCompanyExpiresAt > now ? employer.featuredCompanyExpiresAt : now;
+  employer.isFeaturedCompany = true;
+  employer.featuredCompanyExpiresAt = new Date(base.getTime() + txn.featuredDurationDays * 86400000);
+  await employer.save();
+
+  txn.status = 'paid';
+  txn.razorpayPaymentId = razorpayPaymentId;
+  txn.razorpaySignature = razorpaySignature;
+  await txn.save();
+
+  return ApiResponse.success(res, {
+    data: { isFeaturedCompany: true, featuredCompanyExpiresAt: employer.featuredCompanyExpiresAt },
+    message: 'Company is now featured',
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  PAYMENT HISTORY, ENTITLEMENTS, AUTO-RENEW
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** @route GET /api/v1/job-registration/employer/transactions */
+const getMyTransactions = asyncHandler(async (req, res) => {
+  const JobsTransaction = require('../models/JobsTransaction');
+  const transactions = await JobsTransaction.find({ employer: userId(req) })
+    .sort({ createdAt: -1 })
+    .populate('job', 'title')
+    .limit(200);
+  return ApiResponse.success(res, { data: transactions, message: 'Payment history' });
+});
+
+/**
+ * Single source of truth the client uses to decide what to gate/paywall —
+ * lets the UI show an upgrade prompt proactively instead of guessing from
+ * a 403 response. Mirrors the same checks the individual endpoints enforce
+ * server-side (this endpoint is advisory only; every gated action still
+ * re-checks entitlement itself).
+ * @route GET /api/v1/job-registration/employer/entitlements
+ */
+const getEntitlements = asyncHandler(async (req, res) => {
+  const profile = await EmployerProfile.findOne({ user: userId(req) });
+  if (!profile) {
+    return ApiResponse.success(res, {
+      data: { registered: false, plan: 'free', subscribed: false },
+      message: 'Not registered as an employer',
+    });
+  }
+  const subscribed = hasActiveSubscription(profile);
+  const planDoc = await getEmployerPlanDoc(profile);
+  const activeListings = await Job.countDocuments({
+    postedBy: userId(req),
+    adminStatus: { $in: ['pending_review', 'approved'] },
+  });
+
+  return ApiResponse.success(res, {
+    data: {
+      registered: true,
+      plan: profile.subscriptionPlan,
+      planName: planDoc?.name,
+      subscribed,
+      subscriptionExpiresAt: profile.subscriptionExpiresAt,
+      autoRenew: profile.autoRenew,
+      unlockCredits: profile.unlockCredits,
+      isFeaturedCompany: Boolean(profile.isFeaturedCompany && profile.featuredCompanyExpiresAt > new Date()),
+      featuredCompanyExpiresAt: profile.featuredCompanyExpiresAt,
+      maxListings: planDoc?.maxListings,
+      activeListings,
+      canSearchCandidates: Boolean(planDoc?.candidateSearch),
+      unlimitedApplicants: Boolean(planDoc?.unlimitedApplicants),
+      canScheduleInterview: Boolean(planDoc?.interviewScheduling),
+      verifiedBadge: Boolean(planDoc?.verifiedBadge),
+      canViewAnalytics: Boolean(planDoc?.hiringAnalytics),
+    },
+    message: 'Entitlements',
+  });
+});
+
+/**
+ * Toggle renewal reminders. IMPORTANT: this app has no Razorpay Subscriptions
+ * (recurring billing) integration — every payment here is a one-time order.
+ * There is no live recurring charge to actually cancel. This flag only
+ * controls whether the app nudges the employer to renew as expiry
+ * approaches. TODO(backend): if true auto-billing is required, integrate
+ * Razorpay Subscriptions API (recurring mandates) — a materially different
+ * payment flow from the one-time orders used everywhere else in this app.
+ * @route PATCH /api/v1/job-registration/employer/auto-renew
+ * @body  { autoRenew: boolean }
+ */
+const setAutoRenew = asyncHandler(async (req, res) => {
+  const profile = await EmployerProfile.findOne({ user: userId(req) });
+  if (!profile) throw ApiError.badRequest('Register as an employer first');
+  profile.autoRenew = Boolean(req.body?.autoRenew);
+  await profile.save();
+  return ApiResponse.success(res, {
+    data: { autoRenew: profile.autoRenew },
+    message: profile.autoRenew ? 'Renewal reminders enabled' : 'Renewal reminders turned off',
+  });
+});
+
+/**
+ * Public: companies that have actually paid for Featured Company placement
+ * and haven't expired. The Jobs Home "Featured Companies" carousel
+ * previously had no backend/subscription concept at all — it was purely a
+ * client-side grouping of job listings by company name. This is the real,
+ * paid-for list; the client falls back to that grouping only when this
+ * returns too few results to fill the carousel.
+ * @route GET /api/v1/job-registration/employers/featured
+ */
+const getFeaturedCompanies = asyncHandler(async (req, res) => {
+  const employers = await EmployerProfile.find({
+    status: 'approved',
+    isFeaturedCompany: true,
+    featuredCompanyExpiresAt: { $gt: new Date() },
+  })
+    .select('businessName logoUrl address.city featuredCompanyExpiresAt')
+    .sort({ featuredCompanyExpiresAt: -1 })
+    .limit(20);
+
+  return ApiResponse.success(res, {
+    data: employers.map((e) => ({
+      employerId: e._id,
+      name: e.businessName,
+      logoUrl: e.logoUrl || null,
+      city: e.address?.city || '',
+    })),
+    message: 'Featured companies',
   });
 });
 
@@ -1248,6 +1559,8 @@ module.exports = {
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
   upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV, getSeekerInsights,
   getPlans, subscribeToPlan,
+  createFeaturedCompanyOrder, verifyFeaturedCompanyOrder, getFeaturedCompanies,
+  getMyTransactions, getEntitlements, setAutoRenew,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
   adminEditJob, adminDeleteJob, adminEditSeeker,
@@ -1256,4 +1569,8 @@ module.exports = {
   // an applicant's rich seeker-profile data (skills/education/portfolio/etc)
   // isn't duplicated onto the Application sub-document.
   presentCandidate, recordProfileViews,
+  // Reused by jobController for Phase 2 feature-gating (scheduleInterview,
+  // getJobApplications applicant-visibility cap) so plan entitlement logic
+  // has exactly one implementation.
+  hasActiveSubscription, getEmployerPlanDoc,
 };

@@ -25,6 +25,8 @@ const {
   updateApplicationNotes,
   reportApplicant,
   getCandidateForApplication,
+  createBoostOrder,
+  verifyBoostOrder,
   adminCreateJob,
 } = require('../controllers/jobController');
 
@@ -59,6 +61,8 @@ router.post('/:id/apply', protect, applyForJob);
 router.patch('/:id', protect, updateJob);
 router.delete('/:id', protect, deleteJob);
 router.post('/:id/boost', protect, boostJob);
+router.post('/:id/boost/order',  protect, createBoostOrder);
+router.post('/:id/boost/verify', protect, verifyBoostOrder);
 router.post('/:id/duplicate', protect, duplicateJob);
 router.get('/:id/applications', protect, getJobApplications);
 router.get('/:id/applications/:applicationId/candidate',      protect, getCandidateForApplication);

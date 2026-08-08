@@ -25,14 +25,27 @@ const EmployerProfileSchema = new mongoose.Schema({
   reviewedBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   reviewedAt:   { type: Date },
 
-  // Subscription
+  // Subscription — plan keys are legacy internal values (free/basic/premium);
+  // Phase 2 monetization displays these as Free / Professional / Business
+  // everywhere in the UI. Keeping the enum values unchanged avoids a data
+  // migration across every existing subscribed employer.
   subscriptionPlan: { type: String, enum: ['free', 'basic', 'premium'], default: 'free' },
   subscriptionExpiresAt: { type: Date },
   subscriptionPaidAt:    { type: Date },
   subscriptionAmount:    { type: Number, default: 0 },
+  // Renewal reminders only — this app has no recurring/auto-billing
+  // integration (Razorpay Subscriptions API isn't wired up), so this does
+  // NOT cancel a real recurring charge. See jobRegistrationController's
+  // cancelAutoRenew for the documented limitation.
+  autoRenew: { type: Boolean, default: true },
 
   // Prepaid unlock credits (buy bundles, deduct per unlock)
   unlockCredits: { type: Number, default: 0 },
+
+  // One-time "Featured Company" purchase — separate from job-level boosts,
+  // surfaces the company in the Featured Companies carousel.
+  isFeaturedCompany:       { type: Boolean, default: false },
+  featuredCompanyExpiresAt:{ type: Date },
 
   // Usage tracking
   activeListings: { type: Number, default: 0 },
@@ -43,12 +56,14 @@ const EmployerProfileSchema = new mongoose.Schema({
 EmployerProfileSchema.index({ user: 1 });
 EmployerProfileSchema.index({ status: 1 });
 
-// Plan limits
+// Plan limits — mirrors SubscriptionPlan collection's seed defaults
+// (getPlans in jobRegistrationController). maxListings: -1 means unlimited.
+// Keep these two in sync if pricing/limits change.
 EmployerProfileSchema.virtual('planLimits').get(function () {
   const plans = {
-    free:    { maxListings: 1,  featured: 0,  price: 0 },
-    basic:   { maxListings: 5,  featured: 1,  price: 999 },
-    premium: { maxListings: 20, featured: 5,  price: 2499 },
+    free:    { maxListings: 2,  featured: 0,  price: 0 },
+    basic:   { maxListings: -1, featured: 1,  price: 999 },
+    premium: { maxListings: -1, featured: 5,  price: 2499 },
   };
   return plans[this.subscriptionPlan] || plans.free;
 });

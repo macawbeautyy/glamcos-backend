@@ -156,6 +156,10 @@ const JobSchema = new mongoose.Schema({
   isActive:   { type: Boolean, default: false },
   isFeatured: { type: Boolean, default: false },
   isUrgent:   { type: Boolean, default: false },
+  // Paid boost — set by verifyBoostOrder. isFeatured/isUrgent stay true only
+  // until this expires; read paths lazily clear them once past this date
+  // (see clearExpiredBoost in jobController) rather than needing a cron job.
+  boostExpiresAt: { type: Date },
 
   adminStatus: {
     type: String,

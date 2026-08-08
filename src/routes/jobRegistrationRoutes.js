@@ -6,6 +6,8 @@ const {
   registerEmployer, getMyEmployerProfile, updateEmployerProfile,
   upsertSeekerProfile, getMySeekerProfile, uploadSeekerCV, getSeekerInsights,
   getPlans, subscribeToPlan,
+  createFeaturedCompanyOrder, verifyFeaturedCompanyOrder, getFeaturedCompanies,
+  getMyTransactions, getEntitlements, setAutoRenew,
   adminGetEmployers, adminReviewEmployer,
   adminGetPendingJobs, adminReviewJob,
   adminEditJob, adminDeleteJob, adminEditSeeker,
@@ -70,6 +72,16 @@ router.get('/plans',                 getPlans);
 router.post('/subscribe',            protect, subscribeToPlan);
 router.post('/subscribe/order',      protect, createSubscriptionOrder);
 router.post('/subscribe/verify',     protect, verifySubscriptionPayment);
+
+// ── Featured Company (one-time purchase) ─────────────────────────────────────
+router.post('/employer/featured/order',  protect, createFeaturedCompanyOrder);
+router.post('/employer/featured/verify', protect, verifyFeaturedCompanyOrder);
+router.get('/employers/featured',        getFeaturedCompanies);
+
+// ── Payment history / entitlements / renewal preference ─────────────────────
+router.get('/employer/transactions',  protect, getMyTransactions);
+router.get('/employer/entitlements',  protect, getEntitlements);
+router.patch('/employer/auto-renew',  protect, setAutoRenew);
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 router.get('/admin/employers',       protect, authorize('admin', 'superadmin'), adminGetEmployers);

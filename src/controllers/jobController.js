@@ -8,7 +8,7 @@ const asyncHandler     = require('../utils/asyncHandler');
 const crypto           = require('crypto');
 // Reused rather than duplicated — see the comment on the export in
 // jobRegistrationController for why.
-const { presentCandidate, recordProfileViews } = require('./jobRegistrationController');
+const { presentCandidate, recordProfileViews, hasActiveSubscription, getEmployerPlanDoc } = require('./jobRegistrationController');
 
 let Razorpay = null;
 try { Razorpay = require('razorpay'); } catch { Razorpay = null; }
@@ -68,6 +68,14 @@ const getJobs = asyncHandler(async (req, res) => {
   const limit    = Math.min(50, parseInt(req.query.limit) || 10);
   const skip     = (page - 1) * limit;
 
+  // Lazily clear any boosts that expired since the last read — bulk update
+  // instead of per-document saves so a busy jobs feed stays fast. No cron
+  // job needed; this runs on the read path that actually cares about it.
+  await Job.updateMany(
+    { isFeatured: true, boostExpiresAt: { $lt: new Date() } },
+    { $set: { isFeatured: false, isUrgent: false } }
+  ).catch(() => {});
+
   // Candidates only ever see live listings — drafts/paused/closed are excluded.
   const filter = { isActive: true, adminStatus: 'approved', lifecycleStatus: 'active' };
 
@@ -110,6 +118,7 @@ const getJobs = asyncHandler(async (req, res) => {
 const getJobById = asyncHandler(async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) throw ApiError.notFound('Job not found');
+  await clearExpiredBoostIfNeeded(job);
 
   return ApiResponse.success(res, { data: job, message: 'Job fetched successfully' });
 });
@@ -141,17 +150,21 @@ const postJob = asyncHandler(async (req, res) => {
     if (empProfile.status !== 'approved') {
       throw ApiError.badRequest('Your employer account is pending admin approval');
     }
-    // Check plan limits using a live DB count (ignores rejected/inactive jobs)
+    // Check plan limits using a live DB count (ignores rejected/inactive jobs).
+    // maxListings: -1 means unlimited (Professional/Business plans) — skip
+    // the cap entirely rather than comparing against -1.
     const limits = empProfile.planLimits;
-    const liveCount = await Job.countDocuments({
-      postedBy:    req.user._id || req.user.id,
-      adminStatus: { $in: ['pending_review', 'approved'] },
-    });
-    if (liveCount >= limits.maxListings) {
-      throw ApiError.badRequest(
-        `Your ${empProfile.subscriptionPlan} plan allows ${limits.maxListings} active listing${limits.maxListings !== 1 ? 's' : ''}. ` +
-        `You already have ${liveCount} pending or live listing${liveCount !== 1 ? 's' : ''}. Please upgrade your plan or wait for existing listings to close.`
-      );
+    if (limits.maxListings !== -1) {
+      const liveCount = await Job.countDocuments({
+        postedBy:    req.user._id || req.user.id,
+        adminStatus: { $in: ['pending_review', 'approved'] },
+      });
+      if (liveCount >= limits.maxListings) {
+        throw ApiError.badRequest(
+          `Your ${empProfile.subscriptionPlan === 'free' ? 'Free' : empProfile.subscriptionPlan} plan allows ${limits.maxListings} active listing${limits.maxListings !== 1 ? 's' : ''}. ` +
+          `You already have ${liveCount} pending or live listing${liveCount !== 1 ? 's' : ''}. Upgrade to Professional or Business for unlimited job listings.`
+        );
+      }
     }
     empProfileForLink = empProfile;
   }
@@ -287,22 +300,130 @@ const deleteJob = asyncHandler(async (req, res) => {
 });
 
 // ── Boost (mark as featured) ───────────────────────────────────────────────────
+// Admin-only free instant boost (e.g. promotional/editorial placements).
+// Employers must go through createBoostOrder/verifyBoostOrder below — Phase 2
+// monetization makes boosting a paid one-time purchase, not a free action.
 const boostJob = asyncHandler(async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) throw ApiError.notFound('Job not found');
 
-  // Only the job owner or an admin may boost a listing
-  const userId = req.user?._id?.toString() || req.user?.id;
   const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
-  if (job.postedBy?.toString() !== userId && !isAdmin) {
-    throw ApiError.forbidden('Not authorized to boost this job');
+  if (!isAdmin) {
+    throw ApiError.forbidden('Boosting a job requires a paid purchase — use the Boost Job flow in the app.');
   }
 
   job.isFeatured = true;
   job.isUrgent   = true;
+  job.boostExpiresAt = undefined; // admin boosts don't expire automatically
   await job.save();
   return ApiResponse.success(res, { data: job, message: 'Job boosted' });
 });
+
+// ── Paid Boost Job purchase ────────────────────────────────────────────────────
+const BOOST_PRICES = { 3: 299, 7: 599, 15: 999 }; // INR, per duration in days
+
+/**
+ * @route POST /api/v1/jobs/:id/boost/order
+ * @body { days: 3 | 7 | 15 }
+ */
+const createBoostOrder = asyncHandler(async (req, res) => {
+  const { getRazorpayClient } = require('../utils/razorpay');
+  const JobsTransaction = require('../models/JobsTransaction');
+  const EmployerProfile = require('../models/EmployerProfile');
+
+  const userId = req.user?._id?.toString() || req.user?.id;
+  const job = await Job.findById(req.params.id);
+  if (!job) throw ApiError.notFound('Job not found');
+  if (job.postedBy?.toString() !== userId) throw ApiError.forbidden('Not authorized to boost this job');
+
+  const days = Number(req.body?.days);
+  const price = BOOST_PRICES[days];
+  if (!price) throw ApiError.badRequest(`days must be one of: ${Object.keys(BOOST_PRICES).join(', ')}`);
+
+  const employerProfile = await EmployerProfile.findOne({ user: userId });
+
+  const client = getRazorpayClient();
+  const rzpOrder = await client.orders.create({
+    amount: price * 100,
+    currency: 'INR',
+    receipt: `BOOST-${Date.now().toString(36).toUpperCase()}`,
+    notes: { type: 'job_boost', jobId: String(job._id), days, employerId: userId },
+  });
+
+  await JobsTransaction.create({
+    employer: userId,
+    employerProfile: employerProfile?._id,
+    kind: 'job_boost',
+    job: job._id,
+    boostDurationDays: days,
+    amount: price,
+    status: 'created',
+    description: `Job Boost — ${days} Days (${job.title})`,
+    razorpayOrderId: rzpOrder.id,
+  });
+
+  return ApiResponse.success(res, {
+    data: { razorpayOrderId: rzpOrder.id, amount: rzpOrder.amount, currency: rzpOrder.currency, keyId: process.env.RAZORPAY_KEY_ID, days, price },
+    message: 'Boost order created',
+  });
+});
+
+/**
+ * @route POST /api/v1/jobs/:id/boost/verify
+ * @body { razorpayOrderId, razorpayPaymentId, razorpaySignature }
+ */
+const verifyBoostOrder = asyncHandler(async (req, res) => {
+  const { verifyRazorpaySignature } = require('../utils/razorpay');
+  const JobsTransaction = require('../models/JobsTransaction');
+
+  const userId = req.user?._id?.toString() || req.user?.id;
+  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    throw ApiError.badRequest('razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
+  }
+
+  const txn = await JobsTransaction.findOne({ razorpayOrderId, employer: userId, kind: 'job_boost' });
+  if (!txn) throw ApiError.notFound('Boost order not found');
+  if (txn.status === 'paid') {
+    // Idempotent — client retried after already succeeding.
+    return ApiResponse.success(res, { data: { jobId: txn.job, boostExpiresAt: txn.meta?.boostExpiresAt }, message: 'Already boosted' });
+  }
+
+  verifyRazorpaySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
+
+  const job = await Job.findById(txn.job);
+  if (!job) throw ApiError.notFound('Job not found');
+
+  const now = new Date();
+  const base = job.boostExpiresAt && job.boostExpiresAt > now ? job.boostExpiresAt : now;
+  const boostExpiresAt = new Date(base.getTime() + txn.boostDurationDays * 86400000);
+  job.isFeatured = true;
+  job.isUrgent = true;
+  job.boostExpiresAt = boostExpiresAt;
+  await job.save();
+
+  txn.status = 'paid';
+  txn.razorpayPaymentId = razorpayPaymentId;
+  txn.razorpaySignature = razorpaySignature;
+  txn.meta = { ...(txn.meta || {}), boostExpiresAt };
+  await txn.save();
+
+  return ApiResponse.success(res, { data: { job, boostExpiresAt }, message: 'Job boosted — now featured' });
+});
+
+/**
+ * Lazily clears an expired boost on read, so featured placement never
+ * outlives what was paid for without needing a cron job. Called from
+ * getJobs (per-item, best-effort) and getJobById.
+ */
+async function clearExpiredBoostIfNeeded(job) {
+  if (job?.isFeatured && job.boostExpiresAt && job.boostExpiresAt < new Date()) {
+    job.isFeatured = false;
+    job.isUrgent = false;
+    await job.save().catch(() => {});
+  }
+  return job;
+}
 
 /**
  * Duplicate a job as a fresh draft (owner/admin only).
@@ -545,7 +666,28 @@ const getJobApplications = asyncHandler(async (req, res) => {
   // from 'interview' through to 'hired' in the lifecycle keeps it unlocked).
   const INTERVIEW_LIFECYCLE = ['interview', 'accepted', 'declined', 'completed', 'cancelled', 'hired'];
 
-  const applications = job.applications.map(app => {
+  // "Limited Applicant Visibility" on the Free plan — cap how many
+  // applicants are returned rather than masking fields (unlike contact
+  // unlock). Professional/Business see everyone via unlimitedApplicants.
+  const FREE_APPLICANT_VISIBILITY_LIMIT = 10;
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  let visibleApplications = job.applications;
+  let limited = false;
+  let totalApplicants = job.applications.length;
+  if (!isAdmin) {
+    const EmployerProfile = require('../models/EmployerProfile');
+    const employerProfile = await EmployerProfile.findOne({ user: ownerId });
+    const planDoc = await getEmployerPlanDoc(employerProfile);
+    if (!planDoc?.unlimitedApplicants && totalApplicants > FREE_APPLICANT_VISIBILITY_LIMIT) {
+      // Newest first, same ordering the client applies anyway.
+      visibleApplications = [...job.applications]
+        .sort((a, b) => new Date(b.appliedAt || b.createdAt) - new Date(a.appliedAt || a.createdAt))
+        .slice(0, FREE_APPLICANT_VISIBILITY_LIMIT);
+      limited = true;
+    }
+  }
+
+  const applications = visibleApplications.map(app => {
     const unlocked = unlockedSet.has(String(app._id)) || INTERVIEW_LIFECYCLE.includes(app.status);
     const a = app.toObject ? app.toObject() : app;
     const u = a.applicant || {};
@@ -583,7 +725,11 @@ const getJobApplications = asyncHandler(async (req, res) => {
     };
   });
 
-  return ApiResponse.success(res, { data: applications, message: 'Applicants fetched' });
+  return ApiResponse.success(res, {
+    data: applications,
+    message: 'Applicants fetched',
+    meta: { totalApplicants, visibleCount: applications.length, limited },
+  });
 });
 
 // ── Admin: get ALL applications across all jobs ───────────────────────────────
@@ -829,6 +975,21 @@ const scheduleInterview = asyncHandler(async (req, res) => {
   const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
   if (job.postedBy?.toString() !== userId && !isAdmin) {
     throw ApiError.forbidden('Not authorized to schedule for this application');
+  }
+
+  // Interview Scheduling is a Professional/Business feature per the
+  // monetization model — Free-plan employers get a clear paywall error
+  // rather than the action silently working.
+  if (!isAdmin) {
+    const EmployerProfile = require('../models/EmployerProfile');
+    const employerProfile = await EmployerProfile.findOne({ user: userId });
+    const planDoc = await getEmployerPlanDoc(employerProfile);
+    if (!planDoc?.interviewScheduling) {
+      // "Upgrade required:" prefix is a stable, grep-able marker the mobile
+      // app matches on to show a paywall instead of a generic error toast —
+      // see PAYWALL_MESSAGE_PREFIX in mobile-user/src/utils/entitlements.js.
+      throw ApiError.forbidden('Upgrade required: Interview scheduling is a Professional/Business feature.');
+    }
   }
 
   const app = job.applications.id(applicationId);
@@ -1131,5 +1292,7 @@ module.exports = {
   updateApplicationNotes,
   reportApplicant,
   getCandidateForApplication,
+  createBoostOrder,
+  verifyBoostOrder,
   adminCreateJob,
 };
