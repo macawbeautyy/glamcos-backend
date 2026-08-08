@@ -1,10 +1,14 @@
 const Job              = require('../models/Job');
 const CandidateContact = require('../models/CandidateContact');
 const EmployerProfile  = require('../models/EmployerProfile');
+const JobSeekerProfile = require('../models/JobSeekerProfile');
 const ApiError         = require('../utils/ApiError');
 const ApiResponse      = require('../utils/ApiResponse');
 const asyncHandler     = require('../utils/asyncHandler');
 const crypto           = require('crypto');
+// Reused rather than duplicated — see the comment on the export in
+// jobRegistrationController for why.
+const { presentCandidate, recordProfileViews } = require('./jobRegistrationController');
 
 let Razorpay = null;
 try { Razorpay = require('razorpay'); } catch { Razorpay = null; }
@@ -346,10 +350,13 @@ const applyForJob = asyncHandler(async (req, res) => {
     applicant:      userId,
     coverLetter:    req.body.coverLetter    || req.body.coverNote    || '',
     resumeUrl:      req.body.resumeUrl      || '',
+    resumeName:     req.body.resumeName     || '',
     applicantName:  req.body.applicantName  || '',
     applicantPhone: req.body.applicantPhone || '',
     applicantEmail: req.body.applicantEmail || '',
     experience:     req.body.experience     || '',
+    portfolioPhotos: Array.isArray(req.body.portfolioPhotos) ? req.body.portfolioPhotos : [],
+    answers:         Array.isArray(req.body.answers) ? req.body.answers : [],
   });
   job.applicationCount = job.applications.length;
   await job.save();
@@ -479,7 +486,10 @@ const getJobApplications = asyncHandler(async (req, res) => {
   const unlockedSet = new Set(unlockedContacts.map(c => String(c.jobApplicationId)));
 
   const applications = job.applications.map(app => {
-    const unlocked = unlockedSet.has(String(app._id));
+    // Contact unlocks either because the employer paid for it, or — the
+    // real rule for this flow — because they've scheduled an interview.
+    // Once hired, obviously stays unlocked too.
+    const unlocked = unlockedSet.has(String(app._id)) || ['interview', 'hired'].includes(app.status);
     const a = app.toObject ? app.toObject() : app;
     const u = a.applicant || {};
     const phone = u.phone || a.applicantPhone || '';
@@ -493,7 +503,23 @@ const getJobApplications = asyncHandler(async (req, res) => {
       coverLetter: a.coverLetter,
       experience:  a.experience,
       resumeUrl:   unlocked ? a.resumeUrl : null,
+      resumeName:  a.resumeName || '',
+      portfolioPhotos: a.portfolioPhotos || [],
+      answers:         a.answers || [],
+      interviewScheduledAt: a.interviewScheduledAt || null,
+      interviewMode:        a.interviewMode || '',
+      interviewLocation:    a.interviewLocation || '',
+      interviewNotes:       a.interviewNotes || '',
+      recruiterNotes:       a.recruiterNotes || '',
+      reportCount:          (a.reports || []).length,
       unlocked,
+      // Flat convenience fields — the Applicant List / Candidate Profile
+      // screens read these directly; kept alongside `applicant.*` below so
+      // the older JobApplicantsScreen (still registered, unused by any nav
+      // now) doesn't break.
+      applicantName:  name,
+      applicantEmail: unlocked ? email : maskEmail(email),
+      applicantPhone: unlocked ? phone : maskPhone(phone),
       applicant: {
         _id:   u._id || a.applicant,
         name,
@@ -544,12 +570,22 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     throw ApiError.forbidden('Not authorized to update this application');
   }
 
-  const ALLOWED_STATUSES = ['applied', 'shortlisted', 'rejected', 'hired'];
+  // 'interview' is intentionally settable here too (not just via
+  // scheduleInterview below) so a recruiter can undo/change it via the
+  // generic status path if needed; scheduleInterview is the richer path
+  // that also records date/mode/location.
+  const ALLOWED_STATUSES = ['applied', 'viewed', 'shortlisted', 'interview', 'rejected', 'hired'];
   if (!ALLOWED_STATUSES.includes(status)) {
     throw ApiError.badRequest(`status must be one of: ${ALLOWED_STATUSES.join(', ')}`);
   }
 
   const app = job.applications.id(applicationId);
+  if (status === 'viewed' && app.status !== 'applied') {
+    // Never downgrade a further-along status (shortlisted/interview/etc)
+    // back to "viewed" just because the recruiter re-opened the profile.
+    return ApiResponse.success(res, { data: app, message: 'Application status unchanged' });
+  }
+  if (status === 'viewed' && !app.viewedAt) app.viewedAt = new Date();
   app.status    = status;
   app.updatedAt = new Date();
   await job.save();
@@ -705,6 +741,172 @@ const verifyJobApplicantUnlockPayment = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Recruiter: schedule an interview with an applicant.
+ * This is the real unlock trigger for contact details (see getJobApplications
+ * / getCandidateForApplication) — no payment required once an interview is
+ * booked, per product rule.
+ * @route PATCH /api/v1/jobs/applications/:applicationId/schedule-interview
+ */
+const scheduleInterview = asyncHandler(async (req, res) => {
+  const { applicationId } = req.params;
+  const { scheduledAt, mode, location, notes } = req.body;
+
+  if (!scheduledAt || Number.isNaN(new Date(scheduledAt).getTime())) {
+    throw ApiError.badRequest('A valid scheduledAt date/time is required');
+  }
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const userId  = req.user?._id?.toString() || req.user?.id;
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  if (job.postedBy?.toString() !== userId && !isAdmin) {
+    throw ApiError.forbidden('Not authorized to schedule for this application');
+  }
+
+  const app = job.applications.id(applicationId);
+  if (['rejected', 'withdrawn'].includes(app.status)) {
+    throw ApiError.badRequest(`Cannot schedule an interview for a ${app.status} application`);
+  }
+
+  app.status = 'interview';
+  app.interviewScheduledAt = new Date(scheduledAt);
+  app.interviewMode = mode || '';
+  app.interviewLocation = location || '';
+  app.interviewNotes = notes || '';
+  app.updatedAt = new Date();
+  await job.save();
+
+  if (app.applicant) {
+    const { Notif } = require('../services/notifications');
+    Notif.jobInterviewScheduled?.(app.applicant, { jobTitle: job.title, companyName: job.companyName, scheduledAt: app.interviewScheduledAt }).catch(() => {});
+  }
+
+  return ApiResponse.success(res, { data: app, message: 'Interview scheduled — contact details unlocked' });
+});
+
+/**
+ * Recruiter: save/update private notes on an applicant. Never shown to the
+ * candidate — enforced by never returning this field from any candidate-
+ * facing endpoint (getMyApplications, etc).
+ * @route PATCH /api/v1/jobs/applications/:applicationId/notes
+ */
+const updateApplicationNotes = asyncHandler(async (req, res) => {
+  const { applicationId } = req.params;
+  const { notes } = req.body;
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const userId = req.user?._id?.toString() || req.user?.id;
+  if (job.postedBy?.toString() !== userId && req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
+    throw ApiError.forbidden('Not authorized to update notes on this application');
+  }
+
+  const app = job.applications.id(applicationId);
+  app.recruiterNotes = typeof notes === 'string' ? notes : '';
+  app.updatedAt = new Date();
+  await job.save();
+
+  return ApiResponse.success(res, { data: { _id: app._id, recruiterNotes: app.recruiterNotes }, message: 'Notes saved' });
+});
+
+/**
+ * Recruiter: report a candidate/applicant for review. Mirrors Reel.js's
+ * embedded reports[] pattern rather than a new top-level Report model.
+ * @route POST /api/v1/jobs/applications/:applicationId/report
+ */
+const reportApplicant = asyncHandler(async (req, res) => {
+  const { applicationId } = req.params;
+  const { reason } = req.body;
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const userId = req.user?._id?.toString() || req.user?.id;
+  if (job.postedBy?.toString() !== userId && req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
+    throw ApiError.forbidden('Not authorized to report this application');
+  }
+
+  const app = job.applications.id(applicationId);
+  app.reports.push({ reportedBy: userId, reason: reason || 'Not specified', reportedAt: new Date() });
+  await job.save();
+
+  return ApiResponse.success(res, { data: { _id: app._id, reportCount: app.reports.length }, message: 'Reported — our team will review this profile' });
+});
+
+/**
+ * Recruiter: fetch the applicant's full seeker-profile data (skills,
+ * education, portfolio, certifications, etc) merged with this specific
+ * application's data (resume for this application, screening answers,
+ * status, interview info). Reuses presentCandidate/recordProfileViews from
+ * jobRegistrationController so this data isn't duplicated or reshaped twice.
+ * @route GET /api/v1/jobs/:id/applications/:applicationId/candidate
+ */
+const getCandidateForApplication = asyncHandler(async (req, res) => {
+  const { id: jobId, applicationId } = req.params;
+  const ownerId = req.user?._id?.toString() || req.user?.id;
+
+  const job = await Job.findById(jobId);
+  if (!job) throw ApiError.notFound('Job not found');
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  if (job.postedBy?.toString() !== ownerId && !isAdmin) throw ApiError.forbidden('Access denied');
+
+  const app = job.applications.id(applicationId);
+  if (!app) throw ApiError.notFound('Application not found');
+
+  const unlockedByPayment = await CandidateContact.exists({
+    employer: ownerId,
+    $or: [{ jobApplicationId: applicationId }, { seeker: app.applicant }],
+    action: { $in: ['unlock', 'hire'] },
+  });
+  const unlocked = Boolean(unlockedByPayment) || ['interview', 'hired'].includes(app.status);
+
+  const seekerProfile = await JobSeekerProfile.findOne({ user: app.applicant }).populate('user', 'email phone');
+
+  let candidate = null;
+  if (seekerProfile) {
+    candidate = presentCandidate(seekerProfile, { unlocked, shortlisted: app.status === 'shortlisted' });
+    // Only count towards the candidate's analytics if this employer's
+    // account is genuinely approved — mirrors the rule everywhere else
+    // profile views are recorded.
+    const employer = await EmployerProfile.findOne({ user: ownerId });
+    if (employer && employer.status === 'approved') {
+      recordProfileViews(seekerProfile, { employerUserId: ownerId, employerProfileId: employer._id, kind: 'view' });
+    }
+  }
+
+  const a = app.toObject ? app.toObject() : app;
+  return ApiResponse.success(res, {
+    data: {
+      candidate, // null if the applicant never completed a seeker profile — screen falls back to application-only fields
+      application: {
+        _id: a._id,
+        status: a.status,
+        appliedAt: a.appliedAt,
+        coverLetter: a.coverLetter,
+        experience: a.experience,
+        applicantName: a.applicantName,
+        resumeUrl: unlocked ? a.resumeUrl : null,
+        resumeName: a.resumeName || '',
+        portfolioPhotos: a.portfolioPhotos || [],
+        answers: a.answers || [],
+        interviewScheduledAt: a.interviewScheduledAt || null,
+        interviewMode: a.interviewMode || '',
+        interviewLocation: a.interviewLocation || '',
+        interviewNotes: a.interviewNotes || '',
+        recruiterNotes: a.recruiterNotes || '',
+        reportCount: (a.reports || []).length,
+        unlocked,
+        applicantPhone: unlocked ? (a.applicantPhone || '') : maskPhone(a.applicantPhone),
+        applicantEmail: unlocked ? (a.applicantEmail || '') : maskEmail(a.applicantEmail),
+      },
+    },
+    message: 'Candidate profile fetched',
+  });
+});
+
+/**
  * Admin: manually add a job listing (no employer account needed).
  * Created pre-approved and immediately live.
  * @route POST /api/v1/jobs/admin
@@ -761,5 +963,9 @@ module.exports = {
   updateApplicationStatus,
   createJobApplicantUnlockOrder,
   verifyJobApplicantUnlockPayment,
+  scheduleInterview,
+  updateApplicationNotes,
+  reportApplicant,
+  getCandidateForApplication,
   adminCreateJob,
 };

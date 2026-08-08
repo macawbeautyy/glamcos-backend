@@ -10,13 +10,40 @@ const ApplicationSchema = new mongoose.Schema({
   applicantPhone: { type: String, default: '' },
   applicantEmail: { type: String, default: '' },
   experience:     { type: String, default: '' },
+  // Extra artifacts captured by ApplyFlowModal that previously had no home
+  // on this schema and were silently dropped on submit.
+  resumeName:      { type: String, default: '' },
+  portfolioPhotos: [{ type: String }],
+  answers: [{
+    id:    { type: String },
+    label: { type: String },
+    value: { type: mongoose.Schema.Types.Mixed },
+  }],
   status: {
     type: String,
     // 'withdrawn' is candidate-initiated; the rest are employer-initiated.
-    enum: ['applied', 'shortlisted', 'rejected', 'hired', 'withdrawn'],
+    // 'viewed'/'interview' support the recruiter Applicant List / Candidate
+    // Profile flow: 'viewed' is set the first time a recruiter opens the
+    // profile, 'interview' is set by scheduleInterview() below.
+    enum: ['applied', 'viewed', 'shortlisted', 'interview', 'rejected', 'hired', 'withdrawn'],
     default: 'applied',
   },
   withdrawnAt: { type: Date },
+  viewedAt: { type: Date },
+  // ── Interview scheduling — the real unlock trigger for contact details ──
+  interviewScheduledAt: { type: Date },
+  interviewMode:         { type: String, default: '' }, // in_person | video_call | phone_call
+  interviewLocation:     { type: String, default: '' },
+  interviewNotes:        { type: String, default: '' },
+  // Private, recruiter-only notes — visible only to the employer who owns
+  // the job (never surfaced to the candidate).
+  recruiterNotes: { type: String, default: '' },
+  // Lightweight embedded report log, same pattern as Reel.reports.
+  reports: [{
+    reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reason:     { type: String, default: '' },
+    reportedAt: { type: Date, default: Date.now },
+  }],
   appliedAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 }, { _id: true });

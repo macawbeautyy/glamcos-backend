@@ -19,6 +19,10 @@ const {
   updateApplicationStatus,
   createJobApplicantUnlockOrder,
   verifyJobApplicantUnlockPayment,
+  scheduleInterview,
+  updateApplicationNotes,
+  reportApplicant,
+  getCandidateForApplication,
   adminCreateJob,
 } = require('../controllers/jobController');
 
@@ -41,6 +45,9 @@ router.delete('/applications/:applicationId',         protect, deleteApplication
 router.post('/', protect, postJob);
 router.get('/my/listings', protect, getMyListings);
 router.patch('/applications/:applicationId/status', protect, updateApplicationStatus);
+router.patch('/applications/:applicationId/schedule-interview', protect, scheduleInterview);
+router.patch('/applications/:applicationId/notes',              protect, updateApplicationNotes);
+router.post('/applications/:applicationId/report',              protect, reportApplicant);
 
 // ── Dynamic /:id routes (must be AFTER all static routes) ─────────────────────
 router.get('/:id', getJobById);
@@ -50,6 +57,7 @@ router.delete('/:id', protect, deleteJob);
 router.post('/:id/boost', protect, boostJob);
 router.post('/:id/duplicate', protect, duplicateJob);
 router.get('/:id/applications', protect, getJobApplications);
+router.get('/:id/applications/:applicationId/candidate',      protect, getCandidateForApplication);
 router.post('/:id/applications/:applicationId/unlock/order',  protect, createJobApplicantUnlockOrder);
 router.post('/:id/applications/:applicationId/unlock/verify', protect, verifyJobApplicantUnlockPayment);
 

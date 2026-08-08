@@ -1252,4 +1252,8 @@ module.exports = {
   adminGetPendingJobs, adminReviewJob,
   adminEditJob, adminDeleteJob, adminEditSeeker,
   adminUpdatePlan, adminGetSeekers,
+  // Reused by jobController for the recruiter Candidate Profile screen so
+  // an applicant's rich seeker-profile data (skills/education/portfolio/etc)
+  // isn't duplicated onto the Application sub-document.
+  presentCandidate, recordProfileViews,
 };

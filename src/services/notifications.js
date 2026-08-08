@@ -381,6 +381,13 @@ const Notif = {
   jobApplicationHired: (userId, { jobTitle, companyName } = {}) =>
     sendToUser(userId, { title: `Congratulations, you're hired! 🎊`, body: `${companyName || 'The employer'} selected you for ${jobTitle || 'the position'}.`, data: { screen: 'JobApplications' }, channel: CH.DEFAULT, priority: 'high' }),
 
+  jobInterviewScheduled: (userId, { jobTitle, companyName, scheduledAt } = {}) =>
+    sendToUser(userId, {
+      title: `Interview Scheduled 📅`,
+      body: `${companyName || 'An employer'} scheduled an interview with you for ${jobTitle || 'a job'}${scheduledAt ? ` on ${new Date(scheduledAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}.`,
+      data: { screen: 'JobApplications' }, channel: CH.DEFAULT, priority: 'high',
+    }),
+
   // USER ACCOUNT STATUS
   accountSuspended: (userId, { reason } = {}) =>
     sendToUser(userId, { title: `Account Suspended`, body: `Your account has been suspended.${reason ? ` Reason: ${reason}` : ''} Contact support if you think this is a mistake.`, data: { screen: 'Home' }, channel: CH.DEFAULT }),
