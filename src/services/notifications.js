@@ -388,6 +388,41 @@ const Notif = {
       data: { screen: 'JobApplications' }, channel: CH.DEFAULT, priority: 'high',
     }),
 
+  jobInterviewRescheduled: (userId, { jobTitle, companyName, scheduledAt } = {}) =>
+    sendToUser(userId, {
+      title: `Interview Rescheduled 📅`,
+      body: `${companyName || 'An employer'} updated your interview time for ${jobTitle || 'a job'}${scheduledAt ? ` — now ${new Date(scheduledAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}.`,
+      data: { screen: 'JobApplications' }, channel: CH.DEFAULT, priority: 'high',
+    }),
+
+  jobInterviewAccepted: (employerUserId, { jobTitle, candidateName } = {}) =>
+    sendToUser(employerUserId, {
+      title: `Interview Accepted ✅`,
+      body: `${candidateName || 'The candidate'} accepted your interview invite for ${jobTitle || 'your job'}. Their contact details are now unlocked.`,
+      data: { screen: 'ManageJobs' }, channel: CH.DEFAULT, priority: 'high',
+    }),
+
+  jobInterviewDeclined: (employerUserId, { jobTitle, candidateName } = {}) =>
+    sendToUser(employerUserId, {
+      title: `Interview Declined`,
+      body: `${candidateName || 'The candidate'} declined your interview invite for ${jobTitle || 'your job'}.`,
+      data: { screen: 'ManageJobs' }, channel: CH.DEFAULT,
+    }),
+
+  jobInterviewRescheduleRequested: (employerUserId, { jobTitle, candidateName } = {}) =>
+    sendToUser(employerUserId, {
+      title: `Reschedule Requested`,
+      body: `${candidateName || 'A candidate'} requested to reschedule their interview for ${jobTitle || 'your job'}.`,
+      data: { screen: 'ManageJobs' }, channel: CH.DEFAULT,
+    }),
+
+  jobInterviewCancelled: (userId, { jobTitle, companyName, reason } = {}) =>
+    sendToUser(userId, {
+      title: `Interview Cancelled`,
+      body: `${companyName || 'The employer'} cancelled your interview for ${jobTitle || 'a job'}.${reason ? ` Reason: ${reason}` : ''}`,
+      data: { screen: 'JobApplications' }, channel: CH.DEFAULT,
+    }),
+
   // USER ACCOUNT STATUS
   accountSuspended: (userId, { reason } = {}) =>
     sendToUser(userId, { title: `Account Suspended`, body: `Your account has been suspended.${reason ? ` Reason: ${reason}` : ''} Contact support if you think this is a mistake.`, data: { screen: 'Home' }, channel: CH.DEFAULT }),

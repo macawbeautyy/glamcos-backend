@@ -364,17 +364,59 @@ const applyForJob = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: null, message: 'Application submitted successfully' });
 });
 
+// Interview types the ScheduleInterview / InterviewDetails screens use —
+// distinct from the shorter in_person/video_call/phone_call set used
+// elsewhere; kept as free strings on the schema so either UI can write here.
+const INTERVIEW_TYPE_LABELS = { video: 'Video Call', video_call: 'Video Call', phone: 'Phone Call', phone_call: 'Phone Call', in_person: 'In-Person' };
+
+/**
+ * Shapes one application's interview fields into exactly the flat names
+ * InterviewDetailsScreen / ScheduleInterviewScreen read (interviewDate,
+ * interviewTime, interviewType, meetingLink, instructions, ...) — done here
+ * once so neither screen needs to know the underlying Mongoose field names
+ * (interviewScheduledAt, interviewMode, interviewMeetingLink, interviewNotes).
+ */
+function presentInterviewFields(a) {
+  const dt = a.interviewScheduledAt ? new Date(a.interviewScheduledAt) : null;
+  return {
+    interviewDate: dt ? dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
+    interviewTime: dt ? dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '',
+    interviewScheduledAt: a.interviewScheduledAt || null,
+    interviewType: a.interviewMode || 'video',
+    meetingLink: a.interviewMeetingLink || '',
+    location: a.interviewLocation || '',
+    instructions: a.interviewNotes || '',
+    interviewers: a.interviewers || [],
+    rescheduleRequested: Boolean(a.rescheduleRequested),
+    rescheduleRequestNote: a.rescheduleRequestNote || '',
+    respondedAt: a.respondedAt || null,
+    cancelReason: a.cancelReason || '',
+    hireRating: a.hireRating || null,
+    hireFeedback: a.hireFeedback || '',
+  };
+}
+
 // ── Get my applications (as job seeker) ────────────────────────────────────────
 const getMyApplications = asyncHandler(async (req, res) => {
   const userId = req.user?._id?.toString() || req.user?.id;
 
   const jobs = await Job.find({ 'applications.applicant': userId })
-    .select('title companyName location jobType salary applications createdAt');
+    .select('title companyName location jobType salary applications createdAt postedBy employerProfile')
+    .populate('postedBy', 'phone email')
+    .populate('employerProfile', 'businessName phone email logoUrl');
 
   const applications = jobs.map(job => {
     const app = job.applications.find(a => a.applicant?.toString() === userId);
+    const a = app.toObject ? app.toObject() : app;
+    // Recruiter contact unlocks for the candidate once they've accepted the
+    // interview (or it's since progressed to completed/hired) — the mirror
+    // image of the candidate-contact unlock the employer gets on scheduling.
+    const recruiterUnlocked = ['accepted', 'completed', 'hired'].includes(a.status);
+    const emp = job.employerProfile || {};
+    const posted = job.postedBy || {};
+
     return {
-      _id:         app._id,
+      _id:         a._id,
       job: {
         _id:         job._id,
         title:       job.title,
@@ -383,8 +425,19 @@ const getMyApplications = asyncHandler(async (req, res) => {
         jobType:     job.jobType,
         salary:      job.salary,
       },
-      status:    app.status,
-      appliedAt: app.appliedAt,
+      // Flat convenience fields InterviewDetailsScreen (candidate view) reads.
+      jobTitle:    job.title,
+      jobCity:     job.location?.city || '',
+      companyName: job.companyName,
+      recruiterId: emp._id || posted._id || null,
+      recruiterPhone: recruiterUnlocked ? (emp.phone || posted.phone || '') : '',
+      recruiterEmail: recruiterUnlocked ? (emp.email || posted.email || '') : '',
+      status:    a.status,
+      appliedAt: a.appliedAt,
+      resumeName: a.resumeName || '',
+      portfolioPhotos: a.portfolioPhotos || [],
+      coverNote: a.coverLetter || '',
+      ...presentInterviewFields(a),
     };
   });
 
@@ -434,8 +487,10 @@ const withdrawApplication = asyncHandler(async (req, res) => {
 /**
  * Candidate: permanently remove their application record.
  *
- * Only allowed once it's already withdrawn or rejected — deleting an active
- * application would erase it from the employer's pipeline without warning.
+ * Only allowed once it's reached a terminal state (withdrawn/rejected, or
+ * an interview that ended without a hire: declined/cancelled) — deleting an
+ * active application or one still in a live interview flow would erase it
+ * from the employer's pipeline without warning.
  */
 const deleteApplication = asyncHandler(async (req, res) => {
   const uid = req.user?._id?.toString() || req.user?.id;
@@ -449,7 +504,7 @@ const deleteApplication = asyncHandler(async (req, res) => {
   if (String(app.applicant) !== String(uid)) {
     throw ApiError.forbidden('You can only delete your own application');
   }
-  if (!['withdrawn', 'rejected'].includes(app.status)) {
+  if (!['withdrawn', 'rejected', 'declined', 'cancelled'].includes(app.status)) {
     throw ApiError.badRequest('Withdraw the application before deleting it');
   }
 
@@ -485,11 +540,13 @@ const getJobApplications = asyncHandler(async (req, res) => {
   }).select('jobApplicationId');
   const unlockedSet = new Set(unlockedContacts.map(c => String(c.jobApplicationId)));
 
+  // Contact unlocks either because the employer paid for it, or — the real
+  // rule for this flow — because an interview has been scheduled (any point
+  // from 'interview' through to 'hired' in the lifecycle keeps it unlocked).
+  const INTERVIEW_LIFECYCLE = ['interview', 'accepted', 'declined', 'completed', 'cancelled', 'hired'];
+
   const applications = job.applications.map(app => {
-    // Contact unlocks either because the employer paid for it, or — the
-    // real rule for this flow — because they've scheduled an interview.
-    // Once hired, obviously stays unlocked too.
-    const unlocked = unlockedSet.has(String(app._id)) || ['interview', 'hired'].includes(app.status);
+    const unlocked = unlockedSet.has(String(app._id)) || INTERVIEW_LIFECYCLE.includes(app.status);
     const a = app.toObject ? app.toObject() : app;
     const u = a.applicant || {};
     const phone = u.phone || a.applicantPhone || '';
@@ -506,13 +563,10 @@ const getJobApplications = asyncHandler(async (req, res) => {
       resumeName:  a.resumeName || '',
       portfolioPhotos: a.portfolioPhotos || [],
       answers:         a.answers || [],
-      interviewScheduledAt: a.interviewScheduledAt || null,
-      interviewMode:        a.interviewMode || '',
-      interviewLocation:    a.interviewLocation || '',
-      interviewNotes:       a.interviewNotes || '',
       recruiterNotes:       a.recruiterNotes || '',
       reportCount:          (a.reports || []).length,
       unlocked,
+      ...presentInterviewFields(a),
       // Flat convenience fields — the Applicant List / Candidate Profile
       // screens read these directly; kept alongside `applicant.*` below so
       // the older JobApplicantsScreen (still registered, unused by any nav
@@ -556,14 +610,17 @@ const getAllApplications = asyncHandler(async (req, res) => {
 // ── Update application status ─────────────────────────────────────────────────
 const updateApplicationStatus = asyncHandler(async (req, res) => {
   const { applicationId } = req.params;
-  const { status } = req.body;
+  const { status, rating, feedback, cancelReason } = req.body;
 
   const job = await Job.findOne({ 'applications._id': applicationId });
   if (!job) throw ApiError.notFound('Application not found');
 
   // Only the employer who posted the job (or an admin) may change an
   // application's status — otherwise any logged-in user could tamper
-  // with other employers' applicants.
+  // with other employers' applicants. Note: 'accepted'/'declined' are
+  // deliberately NOT in ALLOWED_STATUSES below — those are candidate-only
+  // actions and go through respondToInterview, which checks the candidate
+  // owns the application instead of this employer-ownership check.
   const userId  = req.user?._id?.toString() || req.user?.id;
   const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
   if (job.postedBy?.toString() !== userId && !isAdmin) {
@@ -573,8 +630,9 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
   // 'interview' is intentionally settable here too (not just via
   // scheduleInterview below) so a recruiter can undo/change it via the
   // generic status path if needed; scheduleInterview is the richer path
-  // that also records date/mode/location.
-  const ALLOWED_STATUSES = ['applied', 'viewed', 'shortlisted', 'interview', 'rejected', 'hired'];
+  // that also records date/mode/location. 'completed'/'cancelled' come from
+  // the recruiter's "Mark Completed" / "Cancel Interview" actions.
+  const ALLOWED_STATUSES = ['applied', 'viewed', 'shortlisted', 'interview', 'completed', 'cancelled', 'rejected', 'hired'];
   if (!ALLOWED_STATUSES.includes(status)) {
     throw ApiError.badRequest(`status must be one of: ${ALLOWED_STATUSES.join(', ')}`);
   }
@@ -586,6 +644,14 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { data: app, message: 'Application status unchanged' });
   }
   if (status === 'viewed' && !app.viewedAt) app.viewedAt = new Date();
+  if (status === 'cancelled') { app.cancelledAt = new Date(); app.cancelReason = cancelReason || ''; }
+  // Close Job → Candidate Hired carries an optional rating/feedback from
+  // the same modal — persisted here rather than a separate endpoint since
+  // it's set atomically with the hire.
+  if (status === 'hired') {
+    if (rating != null) app.hireRating = Math.max(1, Math.min(5, Number(rating) || 5));
+    if (feedback != null) app.hireFeedback = String(feedback).slice(0, 1000);
+  }
   app.status    = status;
   app.updatedAt = new Date();
   await job.save();
@@ -596,9 +662,10 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     if (status === 'shortlisted') Notif.jobApplicationShortlisted(app.applicant, payload).catch(() => {});
     else if (status === 'rejected') Notif.jobApplicationRejected(app.applicant, payload).catch(() => {});
     else if (status === 'hired') Notif.jobApplicationHired(app.applicant, payload).catch(() => {});
+    else if (status === 'cancelled') Notif.jobInterviewCancelled?.(app.applicant, { ...payload, reason: app.cancelReason }).catch(() => {});
   }
 
-  return ApiResponse.success(res, { data: app, message: 'Application status updated' });
+  return ApiResponse.success(res, { data: { ...(app.toObject ? app.toObject() : app), ...presentInterviewFields(app.toObject ? app.toObject() : app) }, message: 'Application status updated' });
 });
 
 // ── Job Applicant Contact Unlock (credits-first, Razorpay fallback) ──────────
@@ -749,7 +816,7 @@ const verifyJobApplicantUnlockPayment = asyncHandler(async (req, res) => {
  */
 const scheduleInterview = asyncHandler(async (req, res) => {
   const { applicationId } = req.params;
-  const { scheduledAt, mode, location, notes } = req.body;
+  const { scheduledAt, mode, location, meetingLink, interviewers, notes } = req.body;
 
   if (!scheduledAt || Number.isNaN(new Date(scheduledAt).getTime())) {
     throw ApiError.badRequest('A valid scheduledAt date/time is required');
@@ -765,24 +832,122 @@ const scheduleInterview = asyncHandler(async (req, res) => {
   }
 
   const app = job.applications.id(applicationId);
+  const wasScheduledBefore = Boolean(app.interviewScheduledAt);
   if (['rejected', 'withdrawn'].includes(app.status)) {
     throw ApiError.badRequest(`Cannot schedule an interview for a ${app.status} application`);
   }
 
+  // Also covers "Reschedule" from InterviewDetailsScreen — re-running this
+  // endpoint resets status back to 'interview' (pending candidate response
+  // again) and clears any outstanding reschedule request/prior response.
   app.status = 'interview';
   app.interviewScheduledAt = new Date(scheduledAt);
   app.interviewMode = mode || '';
   app.interviewLocation = location || '';
+  app.interviewMeetingLink = meetingLink || '';
+  if (Array.isArray(interviewers)) {
+    app.interviewers = interviewers
+      .filter(it => it && it.name)
+      .map(it => ({ name: String(it.name), role: it.role || '', primary: Boolean(it.primary) }));
+  }
   app.interviewNotes = notes || '';
+  app.rescheduleRequested = false;
+  app.rescheduleRequestNote = '';
+  app.respondedAt = null;
   app.updatedAt = new Date();
   await job.save();
 
   if (app.applicant) {
     const { Notif } = require('../services/notifications');
-    Notif.jobInterviewScheduled?.(app.applicant, { jobTitle: job.title, companyName: job.companyName, scheduledAt: app.interviewScheduledAt }).catch(() => {});
+    const payload = { jobTitle: job.title, companyName: job.companyName, scheduledAt: app.interviewScheduledAt };
+    if (wasScheduledBefore) Notif.jobInterviewRescheduled?.(app.applicant, payload).catch(() => {});
+    else Notif.jobInterviewScheduled?.(app.applicant, payload).catch(() => {});
   }
 
-  return ApiResponse.success(res, { data: app, message: 'Interview scheduled — contact details unlocked' });
+  const a = app.toObject ? app.toObject() : app;
+  return ApiResponse.success(res, { data: { ...a, ...presentInterviewFields(a) }, message: 'Interview scheduled — contact details unlocked' });
+});
+
+/**
+ * Candidate: accept or decline a scheduled interview. Ownership-checked
+ * against the applicant, mirroring withdrawApplication — this is why it's
+ * a separate endpoint from updateApplicationStatus (employer-only).
+ * @route PATCH /api/v1/jobs/applications/:applicationId/interview/respond
+ * @body { response: 'accepted' | 'declined' }
+ */
+const respondToInterview = asyncHandler(async (req, res) => {
+  const uid = req.user?._id?.toString() || req.user?.id;
+  const { applicationId } = req.params;
+  const { response } = req.body;
+
+  if (!['accepted', 'declined'].includes(response)) {
+    throw ApiError.badRequest("response must be 'accepted' or 'declined'");
+  }
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const app = job.applications.id(applicationId);
+  if (String(app.applicant) !== String(uid)) {
+    throw ApiError.forbidden('You can only respond to your own interview invite');
+  }
+  if (app.status !== 'interview') {
+    throw ApiError.badRequest(`Cannot respond — this interview is currently "${app.status}"`);
+  }
+
+  app.status = response;
+  app.respondedAt = new Date();
+  app.updatedAt = new Date();
+  await job.save();
+
+  const { Notif } = require('../services/notifications');
+  const payload = { jobTitle: job.title, companyName: job.companyName, candidateName: app.applicantName };
+  if (job.postedBy) {
+    if (response === 'accepted') Notif.jobInterviewAccepted?.(job.postedBy, payload).catch(() => {});
+    else Notif.jobInterviewDeclined?.(job.postedBy, payload).catch(() => {});
+  }
+
+  const a = app.toObject ? app.toObject() : app;
+  return ApiResponse.success(res, {
+    data: { ...a, ...presentInterviewFields(a) },
+    message: response === 'accepted' ? 'Interview accepted — recruiter contact unlocked' : 'Interview declined',
+  });
+});
+
+/**
+ * Candidate: request a reschedule without changing the interview status —
+ * just flags it for the recruiter, who re-runs scheduleInterview to clear it.
+ * @route PATCH /api/v1/jobs/applications/:applicationId/interview/request-reschedule
+ * @body { note }
+ */
+const requestInterviewReschedule = asyncHandler(async (req, res) => {
+  const uid = req.user?._id?.toString() || req.user?.id;
+  const { applicationId } = req.params;
+  const { note } = req.body;
+
+  const job = await Job.findOne({ 'applications._id': applicationId });
+  if (!job) throw ApiError.notFound('Application not found');
+
+  const app = job.applications.id(applicationId);
+  if (String(app.applicant) !== String(uid)) {
+    throw ApiError.forbidden('You can only request a reschedule for your own interview');
+  }
+  if (app.status !== 'interview') {
+    throw ApiError.badRequest(`Cannot request a reschedule — this interview is currently "${app.status}"`);
+  }
+
+  app.rescheduleRequested = true;
+  app.rescheduleRequestNote = note || '';
+  app.rescheduleRequestedAt = new Date();
+  app.updatedAt = new Date();
+  await job.save();
+
+  if (job.postedBy) {
+    const { Notif } = require('../services/notifications');
+    Notif.jobInterviewRescheduleRequested?.(job.postedBy, { jobTitle: job.title, candidateName: app.applicantName, note: app.rescheduleRequestNote }).catch(() => {});
+  }
+
+  return ApiResponse.success(res, { data: { _id: app._id, rescheduleRequested: true }, message: 'Reschedule request sent to the recruiter' });
 });
 
 /**
@@ -860,7 +1025,7 @@ const getCandidateForApplication = asyncHandler(async (req, res) => {
     $or: [{ jobApplicationId: applicationId }, { seeker: app.applicant }],
     action: { $in: ['unlock', 'hire'] },
   });
-  const unlocked = Boolean(unlockedByPayment) || ['interview', 'hired'].includes(app.status);
+  const unlocked = Boolean(unlockedByPayment) || ['interview', 'accepted', 'declined', 'completed', 'cancelled', 'hired'].includes(app.status);
 
   const seekerProfile = await JobSeekerProfile.findOne({ user: app.applicant }).populate('user', 'email phone');
 
@@ -891,15 +1056,12 @@ const getCandidateForApplication = asyncHandler(async (req, res) => {
         resumeName: a.resumeName || '',
         portfolioPhotos: a.portfolioPhotos || [],
         answers: a.answers || [],
-        interviewScheduledAt: a.interviewScheduledAt || null,
-        interviewMode: a.interviewMode || '',
-        interviewLocation: a.interviewLocation || '',
-        interviewNotes: a.interviewNotes || '',
         recruiterNotes: a.recruiterNotes || '',
         reportCount: (a.reports || []).length,
         unlocked,
         applicantPhone: unlocked ? (a.applicantPhone || '') : maskPhone(a.applicantPhone),
         applicantEmail: unlocked ? (a.applicantEmail || '') : maskEmail(a.applicantEmail),
+        ...presentInterviewFields(a),
       },
     },
     message: 'Candidate profile fetched',
@@ -964,6 +1126,8 @@ module.exports = {
   createJobApplicantUnlockOrder,
   verifyJobApplicantUnlockPayment,
   scheduleInterview,
+  respondToInterview,
+  requestInterviewReschedule,
   updateApplicationNotes,
   reportApplicant,
   getCandidateForApplication,

@@ -20,6 +20,8 @@ const {
   createJobApplicantUnlockOrder,
   verifyJobApplicantUnlockPayment,
   scheduleInterview,
+  respondToInterview,
+  requestInterviewReschedule,
   updateApplicationNotes,
   reportApplicant,
   getCandidateForApplication,
@@ -40,6 +42,8 @@ router.get('/applications/my', protect, getMyApplications);
 // Candidate-owned actions on their own application (ownership checked in controller)
 router.patch('/applications/:applicationId/withdraw', protect, withdrawApplication);
 router.delete('/applications/:applicationId',         protect, deleteApplication);
+router.patch('/applications/:applicationId/interview/respond',            protect, respondToInterview);
+router.patch('/applications/:applicationId/interview/request-reschedule', protect, requestInterviewReschedule);
 
 // ── Employer static routes ────────────────────────────────────────────────────
 router.post('/', protect, postJob);

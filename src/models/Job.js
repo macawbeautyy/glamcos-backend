@@ -21,20 +21,45 @@ const ApplicationSchema = new mongoose.Schema({
   }],
   status: {
     type: String,
-    // 'withdrawn' is candidate-initiated; the rest are employer-initiated.
-    // 'viewed'/'interview' support the recruiter Applicant List / Candidate
-    // Profile flow: 'viewed' is set the first time a recruiter opens the
-    // profile, 'interview' is set by scheduleInterview() below.
-    enum: ['applied', 'viewed', 'shortlisted', 'interview', 'rejected', 'hired', 'withdrawn'],
+    // 'withdrawn' is candidate-initiated; the rest are employer-initiated
+    // except 'accepted'/'declined', which only the candidate can set (via
+    // respondToInterview — never through the generic employer-owned
+    // updateApplicationStatus). 'viewed'/'interview' support the recruiter
+    // Applicant List / Candidate Profile flow: 'viewed' is set the first
+    // time a recruiter opens the profile, 'interview' is set by
+    // scheduleInterview() below. 'completed'/'cancelled' are employer-set
+    // once the interview has happened or been called off.
+    enum: ['applied', 'viewed', 'shortlisted', 'interview', 'accepted', 'declined',
+           'completed', 'cancelled', 'rejected', 'hired', 'withdrawn'],
     default: 'applied',
   },
   withdrawnAt: { type: Date },
   viewedAt: { type: Date },
   // ── Interview scheduling — the real unlock trigger for contact details ──
   interviewScheduledAt: { type: Date },
-  interviewMode:         { type: String, default: '' }, // in_person | video_call | phone_call
-  interviewLocation:     { type: String, default: '' },
-  interviewNotes:        { type: String, default: '' },
+  interviewMode:         { type: String, default: '' }, // video | phone | in_person
+  interviewLocation:     { type: String, default: '' }, // in-person address / phone callback number
+  interviewMeetingLink:  { type: String, default: '' }, // video call link
+  interviewNotes:        { type: String, default: '' }, // instructions for the candidate
+  interviewers: [{
+    name:    { type: String, default: '' },
+    role:    { type: String, default: '' },
+    primary: { type: Boolean, default: false },
+  }],
+  // Candidate's accept/decline timestamp — distinct from appliedAt/viewedAt.
+  respondedAt: { type: Date },
+  // Candidate-initiated reschedule request — doesn't change `status`, just
+  // flags it for the recruiter (who then re-runs scheduleInterview, which
+  // clears this flag).
+  rescheduleRequested:   { type: Boolean, default: false },
+  rescheduleRequestNote: { type: String, default: '' },
+  rescheduleRequestedAt: { type: Date },
+  // Employer-initiated cancellation.
+  cancelReason: { type: String, default: '' },
+  cancelledAt:  { type: Date },
+  // Set when status flips to 'hired' via the Close Job → Candidate Hired flow.
+  hireRating:   { type: Number, min: 1, max: 5 },
+  hireFeedback: { type: String, default: '' },
   // Private, recruiter-only notes — visible only to the employer who owns
   // the job (never surfaced to the candidate).
   recruiterNotes: { type: String, default: '' },
