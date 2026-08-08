@@ -64,7 +64,8 @@ const getJobs = asyncHandler(async (req, res) => {
   const limit    = Math.min(50, parseInt(req.query.limit) || 10);
   const skip     = (page - 1) * limit;
 
-  const filter = { isActive: true, adminStatus: 'approved' };
+  // Candidates only ever see live listings — drafts/paused/closed are excluded.
+  const filter = { isActive: true, adminStatus: 'approved', lifecycleStatus: 'active' };
 
   if (req.query.category && req.query.category !== 'all') {
     filter.category = req.query.category;
@@ -115,11 +116,15 @@ const postJob = asyncHandler(async (req, res) => {
     title, salonName, companyName, location, jobType, salary,
     experience, categories: cats, skills, openings, deadline,
     description, contactEmail, isUrgent, isFeatured,
+    // Post Job wizard fields
+    category, requirements, lifecycleStatus, applicationQuestions,
+    subCategory, companyBranch, workMode, incentives, workingHours, weeklyOff,
+    benefits, experienceLevel, education, languages, immediateJoiner,
+    portfolioRequired, ownToolsRequired, genderPreference, agePreference,
+    additionalRequirements,
   } = req.body;
 
-  if (!title || !(salonName || companyName)) {
-    throw ApiError.badRequest('title and companyName are required');
-  }
+  if (!title) throw ApiError.badRequest('title is required');
 
   // Check employer registration
   let empProfileForLink = null;
@@ -147,6 +152,12 @@ const postJob = asyncHandler(async (req, res) => {
     empProfileForLink = empProfile;
   }
 
+  // The wizard posts on behalf of the logged-in employer and doesn't ask for a
+  // company name — it's already on their profile. Only error if we truly can't
+  // resolve one from anywhere.
+  const resolvedCompany = (salonName || companyName || empProfileForLink?.businessName || '').trim();
+  if (!resolvedCompany) throw ApiError.badRequest('companyName is required');
+
   // Parse location string like "Mumbai, Maharashtra" into { city, state }
   let locationObj = { city: '', state: '' };
   const locStr = location || '';
@@ -158,9 +169,12 @@ const postJob = asyncHandler(async (req, res) => {
   }
 
   // Map category labels to enum values
-  const categoryVal = Array.isArray(cats) && cats.length > 0
-    ? (CATEGORY_MAP[cats[0]] || 'other')
-    : 'other';
+  // The wizard sends a single `category` enum directly; the older form sends
+  // `categories` labels that need mapping.
+  const VALID_CATEGORIES = Job.schema.path('category').enumValues;
+  const categoryVal = (category && VALID_CATEGORIES.includes(category))
+    ? category
+    : (Array.isArray(cats) && cats.length > 0 ? (CATEGORY_MAP[cats[0]] || 'other') : 'other');
 
   const skillArr = typeof skills === 'string'
     ? skills.split(',').map(s => s.trim()).filter(Boolean)
@@ -168,7 +182,7 @@ const postJob = asyncHandler(async (req, res) => {
 
   const job = await Job.create({
     title:        title.trim(),
-    companyName:  (salonName || companyName || '').trim(),
+    companyName:  resolvedCompany,
     postedBy:     req.user?._id || req.user?.id || null,
     description:  description || '',
     location:     locationObj,
@@ -188,6 +202,27 @@ const postJob = asyncHandler(async (req, res) => {
     contactEmail: contactEmail || '',
     isUrgent:     isUrgent  || false,
     isFeatured:   isFeatured || false,
+
+    requirements: requirements || '',
+    // Only ever 'draft' or 'active' at creation time.
+    lifecycleStatus: lifecycleStatus === 'draft' ? 'draft' : 'active',
+    applicationQuestions: Array.isArray(applicationQuestions) ? applicationQuestions : [],
+    subCategory:   subCategory   || '',
+    companyBranch: companyBranch || '',
+    workMode:      workMode      || '',
+    incentives:    incentives    || '',
+    workingHours:  workingHours  || '',
+    weeklyOff:     weeklyOff     || '',
+    benefits:      Array.isArray(benefits)  ? benefits  : [],
+    experienceLevel: experienceLevel || '',
+    education:       education       || '',
+    languages:     Array.isArray(languages) ? languages : [],
+    immediateJoiner:   !!immediateJoiner,
+    portfolioRequired: !!portfolioRequired,
+    ownToolsRequired:  !!ownToolsRequired,
+    genderPreference:  genderPreference || '',
+    agePreference:     agePreference    || '',
+    additionalRequirements: additionalRequirements || '',
   });
 
   // Link employer profile if exists
@@ -216,7 +251,13 @@ const updateJob = asyncHandler(async (req, res) => {
 
   const allowed = ['title', 'description', 'jobType', 'salary', 'experience',
                    'skills', 'openings', 'deadline', 'contactEmail',
-                   'isActive', 'isUrgent', 'isFeatured'];
+                   'isActive', 'isUrgent', 'isFeatured',
+                   'category', 'requirements', 'lifecycleStatus',
+                   'applicationQuestions', 'subCategory', 'companyBranch',
+                   'workMode', 'incentives', 'workingHours', 'weeklyOff',
+                   'benefits', 'experienceLevel', 'education', 'languages',
+                   'immediateJoiner', 'portfolioRequired', 'ownToolsRequired',
+                   'genderPreference', 'agePreference', 'additionalRequirements'];
   allowed.forEach(key => {
     if (req.body[key] !== undefined) job[key] = req.body[key];
   });
@@ -257,6 +298,39 @@ const boostJob = asyncHandler(async (req, res) => {
   job.isUrgent   = true;
   await job.save();
   return ApiResponse.success(res, { data: job, message: 'Job boosted' });
+});
+
+/**
+ * Duplicate a job as a fresh draft (owner/admin only).
+ *
+ * Deliberately does NOT copy applications, applicationCount, boost flags or
+ * moderation state — a clone is a new listing that must be reviewed on its
+ * own merits, and inheriting another job's applicants would be wrong.
+ */
+const duplicateJob = asyncHandler(async (req, res) => {
+  const source = await Job.findById(req.params.id);
+  if (!source) throw ApiError.notFound('Job not found');
+
+  const uid = req.user?._id?.toString() || req.user?.id;
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  if (source.postedBy?.toString() !== uid && !isAdmin) {
+    throw ApiError.forbidden('Not authorized to duplicate this job');
+  }
+
+  const clone = source.toObject();
+  ['_id', 'createdAt', 'updatedAt', '__v', 'applications', 'applicationCount',
+   'adminStatus', 'adminRejectReason', 'closedAt'].forEach(k => delete clone[k]);
+
+  const job = await Job.create({
+    ...clone,
+    title: `${source.title} (Copy)`,
+    lifecycleStatus: 'draft',
+    isActive: false,
+    isFeatured: false,
+    isUrgent: false,
+  });
+
+  return ApiResponse.created(res, { data: job, message: 'Job duplicated as draft' });
 });
 
 // ── Apply for a job ────────────────────────────────────────────────────────────
@@ -676,6 +750,7 @@ module.exports = {
   updateJob,
   deleteJob,
   boostJob,
+  duplicateJob,
   applyForJob,
   getMyApplications,
   withdrawApplication,

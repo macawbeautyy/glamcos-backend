@@ -62,6 +62,45 @@ const JobSchema = new mongoose.Schema({
   deadline:   { type: Date },
   contactEmail: { type: String, default: '' },
 
+  // Recruiter-facing lifecycle, distinct from `adminStatus` (moderation) and
+  // `isActive` (legacy visibility flag). Drafts are never shown to candidates.
+  lifecycleStatus: {
+    type: String,
+    enum: ['draft', 'active', 'paused', 'closed'],
+    default: 'active',
+    index: true,
+  },
+  closedAt: { type: Date },
+
+  // ── Extended details captured by the Post Job wizard ──────────────────────
+  subCategory:      { type: String, default: '' },
+  companyBranch:    { type: String, default: '' },
+  workMode:         { type: String, default: '' },   // on_site | home_service | both
+  incentives:       { type: String, default: '' },
+  workingHours:     { type: String, default: '' },
+  weeklyOff:        { type: String, default: '' },
+  benefits:         [{ type: String }],
+  experienceLevel:  { type: String, default: '' },
+  education:        { type: String, default: '' },
+  languages:        [{ type: String }],
+  immediateJoiner:   { type: Boolean, default: false },
+  portfolioRequired: { type: Boolean, default: false },
+  ownToolsRequired:  { type: Boolean, default: false },
+  genderPreference:  { type: String, default: '' },
+  agePreference:     { type: String, default: '' },
+  additionalRequirements: { type: String, default: '' },
+
+  // Employer-defined screening questions shown in the candidate apply flow.
+  // `mapsToField` lets the app pre-fill from the seeker profile / past answers.
+  applicationQuestions: [{
+    id:          { type: String },
+    label:       { type: String },
+    type:        { type: String, default: 'text' },
+    required:    { type: Boolean, default: false },
+    mapsToField: { type: String, default: '' },
+    options:     [{ type: String }],
+  }],
+
   isActive:   { type: Boolean, default: false },
   isFeatured: { type: Boolean, default: false },
   isUrgent:   { type: Boolean, default: false },

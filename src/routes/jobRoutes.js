@@ -8,6 +8,7 @@ const {
   updateJob,
   deleteJob,
   boostJob,
+  duplicateJob,
   applyForJob,
   getMyApplications,
   withdrawApplication,
@@ -47,6 +48,7 @@ router.post('/:id/apply', protect, applyForJob);
 router.patch('/:id', protect, updateJob);
 router.delete('/:id', protect, deleteJob);
 router.post('/:id/boost', protect, boostJob);
+router.post('/:id/duplicate', protect, duplicateJob);
 router.get('/:id/applications', protect, getJobApplications);
 router.post('/:id/applications/:applicationId/unlock/order',  protect, createJobApplicantUnlockOrder);
 router.post('/:id/applications/:applicationId/unlock/verify', protect, verifyJobApplicantUnlockPayment);
