@@ -300,7 +300,7 @@ const PLAN_DEFS = [
     sortOrder: 0,
   },
   {
-    planKey: 'basic', name: 'Professional', price: 999, durationDays: 90,
+    planKey: 'basic', name: 'Professional', price: 999, durationDays: 30,
     maxListings: -1, featuredListings: 1, urgentListings: 2,
     candidateSearch: true, unlimitedApplicants: true, interviewScheduling: true,
     verifiedBadge: true, hiringAnalytics: true, prioritySupport: true,
@@ -309,7 +309,7 @@ const PLAN_DEFS = [
     sortOrder: 1,
   },
   {
-    planKey: 'premium', name: 'Business', price: 2499, durationDays: 90,
+    planKey: 'premium', name: 'Business', price: 2999, durationDays: 30,
     maxListings: -1, featuredListings: 5, urgentListings: 10,
     candidateSearch: true, unlimitedApplicants: true, interviewScheduling: true,
     verifiedBadge: true, hiringAnalytics: true, prioritySupport: true,
@@ -541,7 +541,6 @@ const getCandidates = asyncHandler(async (req, res) => {
     myContacts.filter((c) => c.action === 'reject' && new Date(c.createdAt) > cooldownCutoff)
       .map((c) => String(c.seekerProfile))
   );
-  const unlockedSet   = new Set(myContacts.filter((c) => c.action === 'unlock' || c.action === 'hire').map((c) => String(c.seekerProfile)));
   const shortlistedSet= new Set(myContacts.filter((c) => c.action === 'shortlist').map((c) => String(c.seekerProfile)));
 
   if (shortlistedOnly === 'true') {
@@ -561,9 +560,12 @@ const getCandidates = asyncHandler(async (req, res) => {
     JobSeekerProfile.countDocuments(filter),
   ]);
 
+  // Contact details never unlock from Browse Candidates — the only unlock
+  // path is: recruiter schedules an interview → candidate accepts it. See
+  // jobController.js scheduleInterview / respondToInterview.
   const data = profiles.map((pr) =>
     presentCandidate(pr, {
-      unlocked: unlockedSet.has(String(pr._id)),
+      unlocked: false,
       shortlisted: shortlistedSet.has(String(pr._id)),
     })
   );
@@ -595,7 +597,6 @@ const getCandidates = asyncHandler(async (req, res) => {
  */
 const swipeCandidate = asyncHandler(async (req, res) => {
   const employer = await requireApprovedEmployer(req);
-  const subscribed = hasActiveSubscription(employer);
 
   const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
     .populate('user', 'email phone');
@@ -614,7 +615,8 @@ const swipeCandidate = asyncHandler(async (req, res) => {
     return ApiResponse.success(res, { data: { id: profile._id, status: 'rejected' }, message: 'Candidate passed' });
   }
 
-  // accept → shortlist (+ auto-unlock if subscribed)
+  // accept → shortlist (contact stays locked — only an accepted interview
+  // ever reveals contact details, see scheduleInterview/respondToInterview)
   await CandidateContact.create({
     employer: userId(req),
     seeker: profile.user?._id || profile.user,
@@ -622,33 +624,25 @@ const swipeCandidate = asyncHandler(async (req, res) => {
     action: 'shortlist',
     planAtTime: employer.subscriptionPlan,
   });
-  if (subscribed) {
-    await CandidateContact.create({
-      employer: userId(req),
-      seeker: profile.user?._id || profile.user,
-      seekerProfile: profile._id,
-      action: 'unlock',
-      planAtTime: employer.subscriptionPlan,
-    });
-  }
 
   return ApiResponse.success(res, {
     data: presentCandidate(profile, { unlocked: false, shortlisted: true }),
-    message: subscribed ? 'Candidate shortlisted — contact unlocked' : 'Candidate shortlisted',
+    message: 'Candidate shortlisted',
   });
 });
 
 /** Employer: single candidate (same masking rules) */
 const getCandidateById = asyncHandler(async (req, res) => {
   const employer = await requireApprovedEmployer(req);
-  const subscribed = hasActiveSubscription(employer);
 
   const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
     .populate('user', 'email phone');
   if (!profile) throw ApiError.notFound('Candidate not found');
 
   const contacts = await CandidateContact.find({ employer: userId(req), seekerProfile: profile._id }).select('action');
-  const unlocked = contacts.some((c) => c.action === 'unlock' || c.action === 'hire');
+  // Contact is never unlocked from Browse Candidates — only an accepted
+  // interview reveals it (see jobController.js respondToInterview).
+  const unlocked = false;
   const shortlisted = contacts.some((c) => c.action === 'shortlist');
 
   // Counts toward the candidate's "Profile Views" — we're past
@@ -666,8 +660,10 @@ const getCandidateById = asyncHandler(async (req, res) => {
 });
 
 /**
- * Employer: mark a candidate as hired (no payment — already unlocked).
- * Contact unlock is now pay-per-profile via unlock/order + unlock/verify.
+ * Employer: mark a candidate as hired from the Browse Candidates list. This
+ * is a record-keeping action only — it does not reveal contact details.
+ * Contact only ever unlocks via the interview flow (recruiter schedules →
+ * candidate accepts), see jobController.js respondToInterview.
  * @body { action: 'hire' }
  */
 const contactCandidate = asyncHandler(async (req, res) => {
@@ -677,7 +673,6 @@ const contactCandidate = asyncHandler(async (req, res) => {
     .populate('user', 'email phone');
   if (!profile) throw ApiError.notFound('Candidate not found');
 
-  // Only 'hire' action allowed here (unlock is via paid flow)
   await CandidateContact.create({
     employer: userId(req),
     seeker: profile.user?._id || profile.user,
@@ -689,137 +684,9 @@ const contactCandidate = asyncHandler(async (req, res) => {
   employer.totalHires = (employer.totalHires || 0) + 1;
   await employer.save();
 
-  // Check if already unlocked to return contact
-  const prior = await CandidateContact.findOne({ employer: userId(req), seekerProfile: profile._id, action: { $in: ['unlock', 'hire'] } });
   return ApiResponse.success(res, {
-    data: presentCandidate(profile, { unlocked: Boolean(prior), shortlisted: false }),
+    data: presentCandidate(profile, { unlocked: false, shortlisted: false }),
     message: 'Marked as hired',
-  });
-});
-
-/**
- * Employer: unlock one candidate's contact details.
- * If the employer has prepaid unlock credits, deduct one and return the
- * candidate data immediately (no Razorpay needed).
- * Otherwise create a Razorpay order for ₹499 and return the order details.
- * @route POST /api/v1/job-registration/candidates/:id/unlock/order
- */
-const createUnlockOrder = asyncHandler(async (req, res) => {
-  const employer = await requireApprovedEmployer(req);
-
-  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
-    .populate('user', 'email phone');
-  if (!profile) throw ApiError.notFound('Candidate not found');
-
-  // Already unlocked?
-  const existing = await CandidateContact.findOne({
-    employer: userId(req),
-    seekerProfile: profile._id,
-    action: { $in: ['unlock', 'hire'] },
-  });
-  if (existing) throw ApiError.badRequest('You have already unlocked this candidate');
-
-  // ── Use a prepaid credit if available ────────────────────────────────────
-  if (employer.unlockCredits > 0) {
-    employer.unlockCredits -= 1;
-    await employer.save();
-
-    await CandidateContact.create({
-      employer: userId(req),
-      seeker: profile.user?._id || profile.user,
-      seekerProfile: profile._id,
-      action: 'unlock',
-      planAtTime: 'credit',
-      paidAmount: 0, // paid at bundle purchase time
-    });
-
-    return ApiResponse.success(res, {
-      data: {
-        creditUsed: true,
-        creditsRemaining: employer.unlockCredits,
-        candidate: presentCandidate(profile, { unlocked: true, shortlisted: false }),
-      },
-      message: `1 credit used — contact unlocked. ${employer.unlockCredits} credit(s) remaining.`,
-    });
-  }
-
-  // ── No credits — create Razorpay order ───────────────────────────────────
-  const client = getRazorpayClient();
-  const UNLOCK_PRICE = 49900; // ₹499 in paise
-  const rzpOrder = await client.orders.create({
-    amount: UNLOCK_PRICE,
-    currency: 'INR',
-    receipt: `UNLOCK-${Date.now().toString(36).toUpperCase()}`,
-    notes: {
-      type: 'candidate_unlock',
-      seekerProfileId: String(profile._id),
-      employerId: userId(req),
-    },
-  });
-
-  return ApiResponse.success(res, {
-    data: {
-      razorpayOrderId: rzpOrder.id,
-      amount: rzpOrder.amount,
-      currency: rzpOrder.currency,
-      keyId: process.env.RAZORPAY_KEY_ID,
-      candidateName: profile.fullName,
-    },
-    message: 'Unlock order created — complete payment to view contact details',
-  });
-});
-
-/**
- * Employer: verify Razorpay payment and unlock the candidate's contact details.
- * @route POST /api/v1/job-registration/candidates/:id/unlock/verify
- * @body  { razorpayOrderId, razorpayPaymentId, razorpaySignature }
- */
-const verifyUnlockPayment = asyncHandler(async (req, res) => {
-  const employer = await requireApprovedEmployer(req);
-  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
-
-  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-    throw ApiError.badRequest('razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
-  }
-
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
-
-  const expected = crypto
-    .createHmac('sha256', keySecret)
-    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-    .digest('hex');
-
-  if (expected !== razorpaySignature) {
-    throw ApiError.badRequest('Payment verification failed — signature mismatch');
-  }
-
-  const profile = await JobSeekerProfile.findOne({ _id: req.params.id, status: 'approved' })
-    .populate('user', 'email phone');
-  if (!profile) throw ApiError.notFound('Candidate not found');
-
-  // Record the unlock (idempotent — skip if already recorded)
-  const existing = await CandidateContact.findOne({
-    employer: userId(req),
-    seekerProfile: profile._id,
-    action: { $in: ['unlock', 'hire'] },
-  });
-  if (!existing) {
-    await CandidateContact.create({
-      employer: userId(req),
-      seeker: profile.user?._id || profile.user,
-      seekerProfile: profile._id,
-      action: 'unlock',
-      planAtTime: 'per_profile',
-      paidAmount: 499,
-      razorpayPaymentId,
-      razorpayOrderId,
-    });
-  }
-
-  return ApiResponse.success(res, {
-    data: presentCandidate(profile, { unlocked: true, shortlisted: false }),
-    message: 'Payment verified — contact details unlocked',
   });
 });
 
@@ -950,114 +817,10 @@ const verifySubscriptionPayment = asyncHandler(async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  UNLOCK CREDIT BUNDLES
-// ══════════════════════════════════════════════════════════════════════════════
-
-const BUNDLE_OPTIONS = {
-  1:  { paise: 49900,  label: '1 Unlock Credit'  },
-  5:  { paise: 200000, label: '5 Unlock Credits' },
-  10: { paise: 350000, label: '10 Unlock Credits' },
-};
-
-/**
- * Create a Razorpay order to purchase an unlock credit bundle.
- * @route POST /api/v1/job-registration/credits/order
- * @body  { qty: 1 | 5 | 10 }
- */
-const createBundleOrder = asyncHandler(async (req, res) => {
-  const employer = await requireApprovedEmployer(req);
-  const qty = parseInt(req.body?.qty);
-  const bundle = BUNDLE_OPTIONS[qty];
-  if (!bundle) throw ApiError.badRequest('qty must be 1, 5, or 10');
-
-  const client = getRazorpayClient();
-  const rzpOrder = await client.orders.create({
-    amount: bundle.paise,
-    currency: 'INR',
-    receipt: `BUNDLE${qty}-${Date.now().toString(36).toUpperCase()}`,
-    notes: { type: 'unlock_bundle', qty: String(qty), employerId: userId(req) },
-  });
-
-  const JobsTransaction = require('../models/JobsTransaction');
-  await JobsTransaction.create({
-    employer: userId(req),
-    employerProfile: employer._id,
-    kind: 'credit_bundle',
-    creditQty: qty,
-    amount: bundle.paise / 100,
-    status: 'created',
-    description: bundle.label,
-    razorpayOrderId: rzpOrder.id,
-  });
-
-  return ApiResponse.success(res, {
-    data: {
-      razorpayOrderId: rzpOrder.id,
-      amount: rzpOrder.amount,
-      currency: rzpOrder.currency,
-      keyId: process.env.RAZORPAY_KEY_ID,
-      qty,
-      label: bundle.label,
-    },
-    message: `Bundle order created — pay to receive ${qty} unlock credit(s)`,
-  });
-});
-
-/**
- * Verify bundle payment and credit the employer's account.
- * @route POST /api/v1/job-registration/credits/verify
- * @body  { qty, razorpayOrderId, razorpayPaymentId, razorpaySignature }
- */
-const verifyBundlePayment = asyncHandler(async (req, res) => {
-  const employer = await requireApprovedEmployer(req);
-  const { qty: rawQty, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
-  const qty = parseInt(rawQty);
-
-  if (!BUNDLE_OPTIONS[qty] || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-    throw ApiError.badRequest('qty, razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
-  }
-
-  const JobsTransaction = require('../models/JobsTransaction');
-  const txn = await JobsTransaction.findOne({ razorpayOrderId, employer: userId(req), kind: 'credit_bundle' });
-  if (!txn) throw ApiError.notFound('Bundle order not found');
-  if (txn.status === 'paid') {
-    return ApiResponse.success(res, { data: { unlockCredits: employer.unlockCredits, qty, paymentId: txn.razorpayPaymentId }, message: 'Already credited' });
-  }
-
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
-
-  const expected = crypto
-    .createHmac('sha256', keySecret)
-    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-    .digest('hex');
-  if (expected !== razorpaySignature) {
-    txn.status = 'failed';
-    txn.failureReason = 'Signature mismatch';
-    await txn.save();
-    throw ApiError.badRequest('Payment verification failed — signature mismatch');
-  }
-
-  // Add credits to employer wallet
-  employer.unlockCredits = (employer.unlockCredits || 0) + qty;
-  await employer.save();
-
-  txn.status = 'paid';
-  txn.razorpayPaymentId = razorpayPaymentId;
-  txn.razorpaySignature = razorpaySignature;
-  await txn.save();
-
-  return ApiResponse.success(res, {
-    data: { unlockCredits: employer.unlockCredits, qty, paymentId: razorpayPaymentId },
-    message: `${qty} unlock credit(s) added to your account`,
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
 //  FEATURED COMPANY (one-time purchase, separate from per-job boosts)
 // ══════════════════════════════════════════════════════════════════════════════
 
-const FEATURED_COMPANY_PRICES = { 7: 499, 15: 899, 30: 1499 }; // INR per duration in days
+const FEATURED_COMPANY_PRICES = { 30: 999 }; // INR per duration in days — single 30-day option
 
 /**
  * @route POST /api/v1/job-registration/employer/featured/order
@@ -1184,7 +947,6 @@ const getEntitlements = asyncHandler(async (req, res) => {
       subscribed,
       subscriptionExpiresAt: profile.subscriptionExpiresAt,
       autoRenew: profile.autoRenew,
-      unlockCredits: profile.unlockCredits,
       isFeaturedCompany: Boolean(profile.isFeaturedCompany && profile.featuredCompanyExpiresAt > new Date()),
       featuredCompanyExpiresAt: profile.featuredCompanyExpiresAt,
       maxListings: planDoc?.maxListings,
@@ -1544,15 +1306,11 @@ const adminReviewSeeker = asyncHandler(async (req, res) => {
 module.exports = {
   createSubscriptionOrder,
   verifySubscriptionPayment,
-  createBundleOrder,
-  verifyBundlePayment,
   adminCreateSeeker,
   adminDeleteSeeker,
   getCandidates,
   getCandidateById,
   contactCandidate,
-  createUnlockOrder,
-  verifyUnlockPayment,
   swipeCandidate,
   getMyCandidateContacts,
   adminReviewSeeker,

@@ -17,8 +17,6 @@ const {
   getJobApplications,
   getAllApplications,
   updateApplicationStatus,
-  createJobApplicantUnlockOrder,
-  verifyJobApplicantUnlockPayment,
   scheduleInterview,
   respondToInterview,
   requestInterviewReschedule,
@@ -66,7 +64,5 @@ router.post('/:id/boost/verify', protect, verifyBoostOrder);
 router.post('/:id/duplicate', protect, duplicateJob);
 router.get('/:id/applications', protect, getJobApplications);
 router.get('/:id/applications/:applicationId/candidate',      protect, getCandidateForApplication);
-router.post('/:id/applications/:applicationId/unlock/order',  protect, createJobApplicantUnlockOrder);
-router.post('/:id/applications/:applicationId/unlock/verify', protect, verifyJobApplicantUnlockPayment);
 
 module.exports = router;

@@ -1,11 +1,9 @@
 const Job              = require('../models/Job');
-const CandidateContact = require('../models/CandidateContact');
 const EmployerProfile  = require('../models/EmployerProfile');
 const JobSeekerProfile = require('../models/JobSeekerProfile');
 const ApiError         = require('../utils/ApiError');
 const ApiResponse      = require('../utils/ApiResponse');
 const asyncHandler     = require('../utils/asyncHandler');
-const crypto           = require('crypto');
 // Reused rather than duplicated — see the comment on the export in
 // jobRegistrationController for why.
 const { presentCandidate, recordProfileViews, hasActiveSubscription, getEmployerPlanDoc } = require('./jobRegistrationController');
@@ -320,7 +318,7 @@ const boostJob = asyncHandler(async (req, res) => {
 });
 
 // ── Paid Boost Job purchase ────────────────────────────────────────────────────
-const BOOST_PRICES = { 3: 299, 7: 599, 15: 999 }; // INR, per duration in days
+const BOOST_PRICES = { 3: 199, 7: 399, 15: 699 }; // INR, per duration in days
 
 /**
  * @route POST /api/v1/jobs/:id/boost/order
@@ -653,17 +651,10 @@ const getJobApplications = asyncHandler(async (req, res) => {
     throw ApiError.forbidden('Access denied');
   }
 
-  // Which applications has this employer already unlocked?
-  const unlockedContacts = await CandidateContact.find({
-    employer: ownerId,
-    jobApplicationId: { $in: job.applications.map(a => a._id) },
-    action: 'unlock',
-  }).select('jobApplicationId');
-  const unlockedSet = new Set(unlockedContacts.map(c => String(c.jobApplicationId)));
-
-  // Contact unlocks either because the employer paid for it, or — the real
-  // rule for this flow — because an interview has been scheduled (any point
-  // from 'interview' through to 'hired' in the lifecycle keeps it unlocked).
+  // Contact unlock rule: ONLY an accepted/in-progress interview reveals
+  // contact details — there is no paid unlock anymore. Any point from
+  // 'interview' (scheduled) through to 'hired' in the lifecycle keeps it
+  // visible.
   const INTERVIEW_LIFECYCLE = ['interview', 'accepted', 'declined', 'completed', 'cancelled', 'hired'];
 
   // "Limited Applicant Visibility" on the Free plan — cap how many
@@ -688,7 +679,7 @@ const getJobApplications = asyncHandler(async (req, res) => {
   }
 
   const applications = visibleApplications.map(app => {
-    const unlocked = unlockedSet.has(String(app._id)) || INTERVIEW_LIFECYCLE.includes(app.status);
+    const unlocked = INTERVIEW_LIFECYCLE.includes(app.status);
     const a = app.toObject ? app.toObject() : app;
     const u = a.applicant || {};
     const phone = u.phone || a.applicantPhone || '';
@@ -812,145 +803,6 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
   }
 
   return ApiResponse.success(res, { data: { ...(app.toObject ? app.toObject() : app), ...presentInterviewFields(app.toObject ? app.toObject() : app) }, message: 'Application status updated' });
-});
-
-// ── Job Applicant Contact Unlock (credits-first, Razorpay fallback) ──────────
-const UNLOCK_PRICE_JOB = 49900; // ₹499 in paise
-
-/**
- * Create a Razorpay order (or use credit) to unlock a job applicant's contact.
- * @route POST /api/v1/jobs/:id/applications/:applicationId/unlock/order
- */
-const createJobApplicantUnlockOrder = asyncHandler(async (req, res) => {
-  const ownerId = req.user?._id?.toString() || req.user?.id;
-  const { id: jobId, applicationId } = req.params;
-
-  const job = await Job.findById(jobId);
-  if (!job) throw ApiError.notFound('Job not found');
-  if (job.postedBy?.toString() !== ownerId) throw ApiError.forbidden('Access denied');
-
-  const app = job.applications.id(applicationId);
-  if (!app) throw ApiError.notFound('Application not found');
-
-  // Already unlocked?
-  const existing = await CandidateContact.findOne({
-    employer: ownerId,
-    jobApplicationId: applicationId,
-    action: 'unlock',
-  });
-  if (existing) throw ApiError.badRequest('Already unlocked');
-
-  // ── Use a prepaid credit if available ────────────────────────────────────
-  const employer = await EmployerProfile.findOne({ user: ownerId });
-  if (employer && employer.unlockCredits > 0) {
-    employer.unlockCredits -= 1;
-    await employer.save();
-
-    await CandidateContact.create({
-      employer: ownerId,
-      seeker: app.applicant,
-      jobId,
-      jobApplicationId: applicationId,
-      action: 'unlock',
-      planAtTime: 'credit',
-      paidAmount: 0,
-    });
-
-    const User = require('../models/User');
-    const userDoc = await User.findById(app.applicant).select('email phone').lean();
-
-    return ApiResponse.success(res, {
-      data: {
-        creditUsed: true,
-        creditsRemaining: employer.unlockCredits,
-        applicationId,
-        phone: userDoc?.phone || app.applicantPhone || null,
-        email: userDoc?.email || app.applicantEmail || null,
-        resumeUrl: app.resumeUrl || null,
-      },
-      message: `1 credit used. ${employer.unlockCredits} remaining.`,
-    });
-  }
-
-  // ── No credits — create Razorpay order ───────────────────────────────────
-  const client = getRazorpayClient();
-  const rzpOrder = await client.orders.create({
-    amount: UNLOCK_PRICE_JOB,
-    currency: 'INR',
-    receipt: `JAPP-${Date.now().toString(36).toUpperCase()}`,
-    notes: { type: 'job_applicant_unlock', jobId, applicationId, employerId: ownerId },
-  });
-
-  return ApiResponse.success(res, {
-    data: {
-      razorpayOrderId: rzpOrder.id,
-      amount: rzpOrder.amount,
-      currency: rzpOrder.currency,
-      keyId: process.env.RAZORPAY_KEY_ID,
-      applicationId,
-    },
-    message: 'Unlock order created',
-  });
-});
-
-/**
- * Verify payment and unlock job applicant contact.
- * @route POST /api/v1/jobs/:id/applications/:applicationId/unlock/verify
- */
-const verifyJobApplicantUnlockPayment = asyncHandler(async (req, res) => {
-  const ownerId = req.user?._id?.toString() || req.user?.id;
-  const { id: jobId, applicationId } = req.params;
-  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
-
-  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-    throw ApiError.badRequest('razorpayOrderId, razorpayPaymentId and razorpaySignature are required');
-  }
-
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (!keySecret) throw ApiError.internal('Razorpay secret not configured');
-
-  const expected = crypto
-    .createHmac('sha256', keySecret)
-    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-    .digest('hex');
-  if (expected !== razorpaySignature) throw ApiError.badRequest('Payment verification failed');
-
-  const job = await Job.findById(jobId);
-  if (!job) throw ApiError.notFound('Job not found');
-  if (job.postedBy?.toString() !== ownerId) throw ApiError.forbidden('Access denied');
-
-  const app = job.applications.id(applicationId);
-  if (!app) throw ApiError.notFound('Application not found');
-
-  const alreadyUnlocked = await CandidateContact.findOne({
-    employer: ownerId, jobApplicationId: applicationId, action: 'unlock',
-  });
-  if (!alreadyUnlocked) {
-    await CandidateContact.create({
-      employer: ownerId,
-      seeker: app.applicant,
-      jobId,
-      jobApplicationId: applicationId,
-      action: 'unlock',
-      planAtTime: 'per_profile',
-      paidAmount: 499,
-      razorpayPaymentId,
-      razorpayOrderId,
-    });
-  }
-
-  const User = require('../models/User');
-  const userDoc = await User.findById(app.applicant).select('email phone').lean();
-
-  return ApiResponse.success(res, {
-    data: {
-      applicationId,
-      phone: userDoc?.phone || app.applicantPhone || null,
-      email: userDoc?.email || app.applicantEmail || null,
-      resumeUrl: app.resumeUrl || null,
-    },
-    message: 'Payment verified — contact unlocked',
-  });
 });
 
 /**
@@ -1181,12 +1033,9 @@ const getCandidateForApplication = asyncHandler(async (req, res) => {
   const app = job.applications.id(applicationId);
   if (!app) throw ApiError.notFound('Application not found');
 
-  const unlockedByPayment = await CandidateContact.exists({
-    employer: ownerId,
-    $or: [{ jobApplicationId: applicationId }, { seeker: app.applicant }],
-    action: { $in: ['unlock', 'hire'] },
-  });
-  const unlocked = Boolean(unlockedByPayment) || ['interview', 'accepted', 'declined', 'completed', 'cancelled', 'hired'].includes(app.status);
+  // Contact unlock rule: only an accepted/in-progress interview reveals
+  // contact details — no paid unlock anymore.
+  const unlocked = ['interview', 'accepted', 'declined', 'completed', 'cancelled', 'hired'].includes(app.status);
 
   const seekerProfile = await JobSeekerProfile.findOne({ user: app.applicant }).populate('user', 'email phone');
 
@@ -1284,8 +1133,6 @@ module.exports = {
   getJobApplications,
   getAllApplications,
   updateApplicationStatus,
-  createJobApplicantUnlockOrder,
-  verifyJobApplicantUnlockPayment,
   scheduleInterview,
   respondToInterview,
   requestInterviewReschedule,

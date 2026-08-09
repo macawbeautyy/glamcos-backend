@@ -39,8 +39,6 @@ const EmployerProfileSchema = new mongoose.Schema({
   // cancelAutoRenew for the documented limitation.
   autoRenew: { type: Boolean, default: true },
 
-  // Prepaid unlock credits (buy bundles, deduct per unlock)
-  unlockCredits: { type: Number, default: 0 },
 
   // One-time "Featured Company" purchase — separate from job-level boosts,
   // surfaces the company in the Featured Companies carousel.
@@ -63,7 +61,7 @@ EmployerProfileSchema.virtual('planLimits').get(function () {
   const plans = {
     free:    { maxListings: 2,  featured: 0,  price: 0 },
     basic:   { maxListings: -1, featured: 1,  price: 999 },
-    premium: { maxListings: -1, featured: 5,  price: 2499 },
+    premium: { maxListings: -1, featured: 5,  price: 2999 },
   };
   return plans[this.subscriptionPlan] || plans.free;
 });
