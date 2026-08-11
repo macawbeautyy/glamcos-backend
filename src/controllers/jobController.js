@@ -81,6 +81,13 @@ const getJobs = asyncHandler(async (req, res) => {
     filter.category = req.query.category;
   }
   if (req.query.jobType) filter.jobType = req.query.jobType;
+  // CompanyProfileScreen relies on this — previously unfiltered server-side,
+  // so it worked only by luck (client-side filtering a fixed-size recent
+  // page) and could miss a company's jobs entirely once >50 newer jobs
+  // from other employers existed.
+  if (req.query.companyName) {
+    filter.companyName = new RegExp(`^${req.query.companyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+  }
 
   // Text search
   if (req.query.q) {
@@ -92,7 +99,10 @@ const getJobs = asyncHandler(async (req, res) => {
       .sort({ isFeatured: -1, isUrgent: -1, createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select('-applications'),
+      .select('-applications')
+      // Company logo — CompanyProfileScreen falls back to a plain initials
+      // tile without this; EmployerProfile already has a logoUrl field.
+      .populate('employerProfile', 'logoUrl'),
     Job.countDocuments(filter),
   ]);
 
