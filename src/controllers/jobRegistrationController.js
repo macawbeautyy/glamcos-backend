@@ -1117,6 +1117,27 @@ const adminReviewEmployer = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { data: profile, message: `Employer ${action}d` });
 });
 
+/**
+ * Admin: permanently delete an employer.
+ * Removes the EmployerProfile itself and every Job it posted (so no
+ * orphaned listings survive it), so the admin has full control to remove
+ * a business from the platform entirely — not just approve/reject.
+ */
+const adminDeleteEmployer = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const profile = await EmployerProfile.findById(id);
+  if (!profile) throw ApiError.notFound('Employer not found');
+
+  const { deletedCount: jobsDeleted } = await Job.deleteMany({ employerProfile: id });
+  await EmployerProfile.findByIdAndDelete(id);
+
+  return ApiResponse.success(res, {
+    data: { deletedEmployerId: id, jobsDeleted },
+    message: `Employer "${profile.businessName}" and ${jobsDeleted} job listing(s) deleted`,
+  });
+});
+
 /** Admin: list job listings (all statuses or filtered) */
 const adminGetPendingJobs = asyncHandler(async (req, res) => {
   const { status = 'pending_review', page = 1, limit = 200 } = req.query;
@@ -1319,7 +1340,7 @@ module.exports = {
   getPlans, subscribeToPlan,
   createFeaturedCompanyOrder, verifyFeaturedCompanyOrder, getFeaturedCompanies,
   getMyTransactions, getEntitlements, setAutoRenew,
-  adminGetEmployers, adminReviewEmployer,
+  adminGetEmployers, adminReviewEmployer, adminDeleteEmployer,
   adminGetPendingJobs, adminReviewJob,
   adminEditJob, adminDeleteJob, adminEditSeeker,
   adminUpdatePlan, adminGetSeekers,

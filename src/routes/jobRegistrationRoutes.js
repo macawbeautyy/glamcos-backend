@@ -8,7 +8,7 @@ const {
   getPlans, subscribeToPlan,
   createFeaturedCompanyOrder, verifyFeaturedCompanyOrder, getFeaturedCompanies,
   getMyTransactions, getEntitlements, setAutoRenew,
-  adminGetEmployers, adminReviewEmployer,
+  adminGetEmployers, adminReviewEmployer, adminDeleteEmployer,
   adminGetPendingJobs, adminReviewJob,
   adminEditJob, adminDeleteJob, adminEditSeeker,
   adminUpdatePlan, adminGetSeekers,
@@ -76,6 +76,7 @@ router.patch('/employer/auto-renew',  protect, setAutoRenew);
 // ── Admin ─────────────────────────────────────────────────────────────────────
 router.get('/admin/employers',       protect, authorize('admin', 'superadmin'), adminGetEmployers);
 router.patch('/admin/employers/:id', protect, authorize('admin', 'superadmin'), adminReviewEmployer);
+router.delete('/admin/employers/:id', protect, authorize('admin', 'superadmin'), adminDeleteEmployer);
 router.get('/admin/jobs',            protect, authorize('admin', 'superadmin'), adminGetPendingJobs);
 router.patch('/admin/jobs/:id',      protect, authorize('admin', 'superadmin'), adminReviewJob);
 router.put('/admin/jobs/:id',        protect, authorize('admin', 'superadmin'), adminEditJob);
