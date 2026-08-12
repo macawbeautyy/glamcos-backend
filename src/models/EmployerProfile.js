@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 const EmployerProfileSchema = new mongoose.Schema({
   user:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   businessName: { type: String, required: true, trim: true },
-  businessType: { type: String, enum: ['salon', 'spa', 'parlour', 'gym', 'clinic', 'academy', 'other'], default: 'salon' },
+  // Salon/beauty-industry categories only — gym/clinic were generic
+  // leftovers unrelated to what this platform actually serves.
+  businessType: { type: String, enum: ['salon', 'spa', 'parlour', 'nail_studio', 'makeup_studio', 'bridal_studio', 'barbershop', 'academy', 'other'], default: 'salon' },
   phone:        { type: String, default: '' },
   email:        { type: String, default: '' },
   website:      { type: String, default: '' },
