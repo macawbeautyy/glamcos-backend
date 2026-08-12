@@ -35,8 +35,13 @@ const registerEmployer = asyncHandler(async (req, res) => {
 
   const {
     businessName, businessType, phone, email, website,
-    gstNumber, address, description,
+    gstNumber, address, description, logoUrl, coverImage, photos,
+    services, benefits, workingHours, weeklyOff, socialLinks,
+    hiringContact, whyWorkWithUs, yearEstablished, employeeCount, numLocations,
   } = req.body;
+  const extra = { logoUrl, coverImage, photos, services, benefits, workingHours,
+                   weeklyOff, socialLinks, hiringContact, whyWorkWithUs,
+                   yearEstablished, employeeCount, numLocations };
 
   if (existing) {
     // Rejected employers may RE-APPLY: update their profile with the new
@@ -53,12 +58,15 @@ const registerEmployer = asyncHandler(async (req, res) => {
       if (gstNumber    !== undefined) existing.gstNumber    = gstNumber;
       if (address      !== undefined) existing.address      = address;
       if (description  !== undefined) existing.description  = description;
+      Object.entries(extra).forEach(([k, v]) => { if (v !== undefined) existing[k] = v; });
       existing.status          = 'pending';
       existing.rejectionReason = '';
       await existing.save();
       return ApiResponse.success(res, { data: existing, message: 'Re-application submitted. Awaiting admin approval.' });
     }
-    // Pending / approved — return existing profile unchanged
+    // Pending / approved — return existing profile unchanged. Company Setup
+    // already exists; the app must route users here to *edit* it, not
+    // re-register (see getMyEmployerProfile — that's the check to use).
     return ApiResponse.success(res, { data: existing, message: 'Profile already exists' });
   }
 
@@ -67,6 +75,7 @@ const registerEmployer = asyncHandler(async (req, res) => {
   const profile = await EmployerProfile.create({
     user: uid, businessName, businessType, phone, email,
     website, gstNumber, address, description,
+    ...Object.fromEntries(Object.entries(extra).filter(([, v]) => v !== undefined)),
     status: 'pending',
   });
 
@@ -86,7 +95,10 @@ const getMyEmployerProfile = asyncHandler(async (req, res) => {
 /** Update employer profile */
 const updateEmployerProfile = asyncHandler(async (req, res) => {
   const allowed = ['businessName', 'businessType', 'phone', 'email', 'website',
-                   'gstNumber', 'address', 'description', 'logoUrl'];
+                   'gstNumber', 'address', 'description', 'logoUrl',
+                   'coverImage', 'photos', 'services', 'benefits', 'workingHours',
+                   'weeklyOff', 'socialLinks', 'hiringContact', 'whyWorkWithUs',
+                   'yearEstablished', 'employeeCount', 'numLocations'];
   const updates = {};
   allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
 
